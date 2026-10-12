@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.0.3 - 2026-10-12
+
+- Added `substance-painter-mcp uninstall`. It finds the `substance-painter` entry in Claude Code (user scope), Claude Desktop, Antigravity, and OpenCode, shows what it will remove, and asks for confirmation. Only that entry is removed: Claude Code through `claude mcp remove -s user`, and JSON configs with a backup and an atomic write. Work folders and projects are never touched.
+- The installer's folder prompt accepts folders dragged in from Finder or Explorer. It handles Finder's backslash escapes and trailing space, quoted paths, and hand-typed paths with spaces or apostrophes. Windows backslash separators are kept.
+- Aligned the installer's summary output.
+- Documented the installer's three questions, an example session, and uninstalling in the README.
+- Added 7 path-input tests and 2 uninstall tests (81 total); the path tests cover macOS and Windows input on every CI platform.
+
 ## 1.0.2 - 2026-10-12
 
 Version 1.0.2 adds an interactive installer: `uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.2 substance-painter-mcp install`.

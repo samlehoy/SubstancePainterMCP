@@ -20,10 +20,49 @@ winget install astral-sh.uv  # Windows
 **1. Run the installer.** It asks which assistants to set up and which work folder the server may use, shows what it will change, and waits for your confirmation.
 
 ```bash
-uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.2 substance-painter-mcp install
+uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.3 substance-painter-mcp install
 ```
 
-Existing config files are backed up first, and only the `substance-painter` entry is changed.
+Answer three questions:
+
+- **Numbers**: the assistants to set up, e.g. `1,3` for Claude Code and Antigravity.
+- **Folder**: the folder with your meshes and reference images; projects, backups, and exports are saved there too. Type the path, or drag the folder from Finder or Explorer into the terminal window, then press Enter. Press Enter alone to use the suggested folder.
+- **Continue?**: type `y`. Existing config files are backed up first, and only the `substance-painter` entry is changed.
+
+<details>
+<summary>Example session (macOS)</summary>
+
+```text
+$ uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.3 substance-painter-mcp install
+Substance Painter MCP 1.0.3 installer
+
+✔ Painter 12.1.5 found
+
+Install into which clients? (comma-separated)
+  1) Claude Code
+  2) Claude Desktop
+  3) Antigravity
+  4) OpenCode
+Numbers: 1,3
+Work folder: the only place the server may read meshes and images,
+and write projects, backups, and exports.
+Folder (type a path or drag a folder here) [/Users/you/SubstanceProjects]: /Users/you/Documents/Forge
+
+This will write:
+  Claude Code     → claude mcp add -s user
+  Antigravity     → /Users/you/.gemini/config/mcp_config.json (backed up first)
+  Server command  → /opt/homebrew/bin/uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.3 substance-painter-mcp
+Continue? (y/N): y
+✔ Claude Code
+✔ Antigravity (backup: mcp_config.json.bak-20261012-213000)
+
+Next steps:
+  1. Quit Painter completely, then start it with remote scripting:
+     open -a "/Applications/Adobe Substance 3D Painter/Adobe Substance 3D Painter.app" --args --enable-remote-scripting
+  2. Restart your MCP client and ask it to check the Painter status.
+```
+
+</details>
 
 **2. Start Painter with remote scripting.** Quit Painter completely first; if it is already running, the flag is ignored.
 
@@ -50,7 +89,7 @@ Every MCP client runs the same command; only the config format differs.
 claude mcp add substance-painter -s user \
   -e SP_MCP_EXPORT_ROOTS="$HOME/SubstanceProjects" \
   -e SP_MCP_PROJECT_ROOTS="$HOME/SubstanceProjects" \
-  -- uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.2 substance-painter-mcp
+  -- uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.3 substance-painter-mcp
 ```
 
 **Claude Desktop, Cursor, Antigravity** (`mcpServers` format; Antigravity uses `~/.gemini/config/mcp_config.json`)
@@ -60,7 +99,7 @@ claude mcp add substance-painter -s user \
   "mcpServers": {
     "substance-painter": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.2", "substance-painter-mcp"],
+      "args": ["--from", "git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.3", "substance-painter-mcp"],
       "env": {
         "SP_MCP_EXPORT_ROOTS": "/path/to/SubstanceProjects",
         "SP_MCP_PROJECT_ROOTS": "/path/to/SubstanceProjects"
@@ -78,7 +117,7 @@ claude mcp add substance-painter -s user \
   "mcp": {
     "substance-painter": {
       "type": "local",
-      "command": ["uvx", "--from", "git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.2", "substance-painter-mcp"],
+      "command": ["uvx", "--from", "git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.3", "substance-painter-mcp"],
       "environment": {
         "SP_MCP_EXPORT_ROOTS": "/path/to/SubstanceProjects",
         "SP_MCP_PROJECT_ROOTS": "/path/to/SubstanceProjects"
@@ -92,6 +131,14 @@ claude mcp add substance-painter -s user \
 If a GUI app cannot find `uvx`, use its absolute path (`which uvx` / `where uvx`). The first run downloads the package and can take about 10 seconds, so raise short client timeouts as in the OpenCode example, or run the command once in a terminal first.
 
 </details>
+
+## Uninstall
+
+```bash
+uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.3 substance-painter-mcp uninstall
+```
+
+It finds `substance-painter` in Claude Code (user scope), Claude Desktop, Antigravity, and OpenCode, shows what it will remove, and asks for confirmation. Only that entry is removed, config files are backed up first, and your work folder and projects are not touched. To also delete the cached package, run `uv cache clean substance-painter-mcp`. If you added the server to a single Claude Code project instead, run `claude mcp remove substance-painter -s local` in that folder.
 
 ## What it can do
 
