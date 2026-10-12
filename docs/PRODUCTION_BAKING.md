@@ -4,7 +4,7 @@ Version 0.7 adds a guarded workflow around Painter's asynchronous baking API: as
 
 ## 1. Approve baking mesh roots
 
-Set `SP_MCP_BAKE_MESH_ROOTS` in the MCP server environment. Multiple Windows roots are separated with semicolons.
+Set `SP_MCP_BAKE_MESH_ROOTS` in the MCP server environment. Separate multiple roots with `;` on Windows or `:` on macOS.
 
 ```json
 {

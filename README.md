@@ -2,12 +2,12 @@
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![MCP SDK 1.x](https://img.shields.io/badge/MCP_SDK-1.x-5A67D8)](https://github.com/modelcontextprotocol/python-sdk)
-[![Tested with Painter 12.1.1](https://img.shields.io/badge/Painter-12.1.1-99E83F)](https://www.adobe.com/products/substance3d/apps/painter.html)
+[![Tested with Painter 12.1.1 and 12.1.5](https://img.shields.io/badge/Painter-12.1.1%20%7C%2012.1.5-99E83F)](https://www.adobe.com/products/substance3d/apps/painter.html)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 An MCP server that lets AI clients inspect, audit, edit, and export from a local Adobe Substance 3D Painter project.
 
-Version **1.0.0** provides 79 focused MCP tools. It completes the guarded resource workflow with shelf discovery, persistent shelf imports, and event-driven shelf refresh jobs, on top of the planned project lifecycle, production baking, and transactional layer authoring added throughout the 0.x releases. It is live-validated against **Substance 3D Painter 12.1.1**.
+Version **1.0.1** provides 79 focused MCP tools. It completes the guarded resource workflow with shelf discovery, persistent shelf imports, and event-driven shelf refresh jobs, on top of the planned project lifecycle, production baking, and transactional layer authoring added throughout the 0.x releases. It is live-validated against **Substance 3D Painter 12.1.1** on Windows and **12.1.5** on macOS (Apple silicon).
 
 > This is an independent community project and is not affiliated with or endorsed by Adobe.
 
@@ -44,7 +44,7 @@ Version **1.0.0** provides 79 focused MCP tools. It completes the guarded resour
 
 | Component | Supported / validated |
 |---|---|
-| Adobe Substance 3D Painter | Live-tested with 12.1.1 |
+| Adobe Substance 3D Painter | Live-tested with 12.1.1 (Windows) and 12.1.5 (macOS, Apple silicon). 12.0.x lacks the geometry-mask API used by snapshots, geometry masks, and recipes. |
 | Painter Python API | Runtime reported 0.3.5 in the validated build |
 | Python | 3.10 or newer |
 | MCP Python SDK | `mcp>=1.28,<2` |
@@ -104,7 +104,7 @@ Painter builds may expose newer features while reporting an older API version st
 | `get_fill_projection` | Inspect Fill projection mode and common UV transforms. |
 | `set_fill_projection` | Set Fill, UV, or Triplanar projection and transforms transactionally. |
 | `get_fill_sources` | Inspect material-mode or per-channel Fill sources. |
-| `set_fill_resource` | Assign a `resource://` asset to one channel or a complete Fill material. |
+| `set_fill_resource` | Assign a `resource://` asset to one channel, a complete Fill material, or a mask Fill effect. |
 | `set_fill_parameters` | Transactionally update typed procedural Substance parameters. |
 | `set_procedural_input` | Connect a verified resource to a procedural image input or reset its default. |
 | `apply_fill_preset` | Apply a named preset exposed by the current procedural source. |
@@ -151,13 +151,43 @@ Layer names are not unique in Painter. All mutation tools therefore use the UIDs
 | `start_mesh_reload` | Optionally back up, then asynchronously reload a mesh after `confirm=true`. |
 | `execute_python` | Run arbitrary Painter Python only when explicitly enabled. |
 
+## Quick install (uvx)
+
+[uv](https://docs.astral.sh/uv/)'s `uvx` runs the server straight from this repository: no clone, virtual environment, or `pip install`. Install uv once (`brew install uv` on macOS, `winget install astral-sh.uv` on Windows), then use this as the MCP server command:
+
+```text
+uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.1 substance-painter-mcp
+```
+
+Pin a release tag so every machine runs the same version. Example for Claude Code on macOS (see [Environment variables](#environment-variables) for the other roots):
+
+```bash
+claude mcp add substance-painter \
+  -e SP_MCP_EXPORT_ROOTS="$HOME/SubstanceProjects" \
+  -e SP_MCP_PROJECT_ROOTS="$HOME/SubstanceProjects" \
+  -- uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.1 substance-painter-mcp
+```
+
+uvx caches the built package, so local code edits are not picked up. To work on the server itself, use the editable installation below.
+
 ## Installation
 
+Windows:
+
 ```powershell
-git clone https://github.com/elliezu/SubstancePainterMCP.git
+git clone https://github.com/samlehoy/SubstancePainterMCP.git
 cd SubstancePainterMCP
 python -m venv .venv
 .venv\Scripts\python.exe -m pip install -e .
+```
+
+macOS (use a Python 3.10+ such as Homebrew's `python3`; the system `/usr/bin/python3` is too old):
+
+```bash
+git clone https://github.com/samlehoy/SubstancePainterMCP.git
+cd SubstancePainterMCP
+python3 -m venv .venv
+.venv/bin/python -m pip install -e .
 ```
 
 For development and tests:
@@ -166,6 +196,8 @@ For development and tests:
 .venv\Scripts\python.exe -m pip install -e ".[dev]"
 .venv\Scripts\python.exe -m pytest
 ```
+
+On macOS, use `.venv/bin/python` in place of `.venv\Scripts\python.exe`.
 
 ## Start Painter with remote scripting
 
@@ -188,6 +220,15 @@ Verify the listener in PowerShell:
 ```powershell
 Get-NetTCPConnection -LocalPort 60041
 ```
+
+On macOS, quit Painter completely (Cmd+Q), then start it with the argument and verify the listener:
+
+```bash
+open -a "/Applications/Adobe Substance 3D Painter/Adobe Substance 3D Painter.app" --args --enable-remote-scripting
+lsof -nP -iTCP:60041 -sTCP:LISTEN
+```
+
+As on Windows, `open` only focuses an already-running Painter and ignores the argument. Painter's help text notes that remote scripting also implies `--disable-modal-popup`.
 
 ## Configure an MCP client
 
@@ -214,6 +255,16 @@ Example for Claude Desktop on Windows:
 
 Replace the paths with your installation and export directories. You may also use `.venv\Scripts\substance-painter-mcp.exe` directly as the command.
 
+On macOS, Claude Desktop reads `~/Library/Application Support/Claude/claude_desktop_config.json`; use `/path/to/SubstancePainterMCP/.venv/bin/python` as the command. For Claude Code:
+
+```bash
+claude mcp add substance-painter \
+  -e SP_MCP_EXPORT_ROOTS="$HOME/SubstanceProjects" \
+  -- /path/to/SubstancePainterMCP/.venv/bin/python -m substance_painter_mcp
+```
+
+Claude Code's default `local` scope registers the server for the current directory only; run the command from the folder you will work in, or add `-s user` to make it available everywhere.
+
 ## Environment variables
 
 | Variable | Default | Description |
@@ -222,7 +273,7 @@ Replace the paths with your installation and export directories. You may also us
 | `SP_MCP_PORT` | `60041` | Painter remote-scripting port. |
 | `SP_MCP_TIMEOUT` | `30` | HTTP timeout in seconds. |
 | `SP_MCP_ALLOW_EXECUTE_PYTHON` | unset | Set to `1` to expose arbitrary Python execution. |
-| `SP_MCP_EXPORT_ROOTS` | unset | Approved export roots. Separate multiple Windows paths with `;`. |
+| `SP_MCP_EXPORT_ROOTS` | unset | Approved export roots. Separate multiple paths with `;` on Windows or `:` on macOS. |
 | `SP_MCP_PROJECT_ROOTS` | unset | Approved roots for `.spp` project copies. |
 | `SP_MCP_MESH_ROOTS` | unset | Approved input roots for FBX, OBJ, DAE, PLY, and USD mesh reloads. |
 | `SP_MCP_BAKE_MESH_ROOTS` | unset | Approved roots for high-poly and cage meshes used by baking. |
@@ -322,6 +373,8 @@ $env:SP_MCP_RESOURCE_ROOTS = "D:\SubstanceResources"
 ```
 
 The 1.0.0 validation run used Painter 12.1.1 and a saved three-Texture-Set test project. It verified all 79 FastMCP schemas and 64 automated tests. The lifecycle validation saved the current 955 MB project; created and verified a 21 MB 256px OpenGL project through a `ProjectEditionEntered` job; verified the backup and explicit Full save; reopened the exact original `.spp`; reloaded the same FBX using typed Auto UV settings while preserving strokes; and observed zero added or removed Texture Sets. The shelf validation then created a disposable writable shelf, imported a PNG as a versioned `SHELF` resource, observed real `ShelfCrawlingStarted` and `ShelfCrawlingEnded` events, re-retrieved the exact ResourceID after refresh, removed the shelf, and restored the original project. All generated project, backup, and shelf artifacts were removed after successful restoration.
+
+The 1.0.1 validation ran on Painter 12.1.5 on macOS (Apple silicon) with 67 automated tests. In a disposable project created from an OBJ, it assigned four bitmaps to one Fill in sequence and kept all four. Repeating an identical `set_active_channels` call and adding the Height channel left them intact. A mask Fill effect accepted a bitmap, and an Anchor binding preserved the existing BaseColor bitmap. The run confirmed that `Roughness` and `Metallic` are enum aliases of `SpecularRoughness` and `BaseMetalness`, and that the export reported the skipped Emissive map.
 
 ## Roadmap and release notes
 

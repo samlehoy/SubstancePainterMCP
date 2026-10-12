@@ -2,6 +2,30 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.0.1 - 2026-10-12
+
+Version 1.0.1 fixes Fill source handling found by live use on Painter 12.1.5 for macOS, and adds macOS and `uvx` installation guidance.
+
+### Fixes
+
+- Fixed Fill sources silently resetting to defaults. Painter 12.1 recreates every channel source on any `active_channels` assignment, even an unchanged set, so a sequence of `set_fill_resource` calls kept only the last bitmap. `set_fill_resource`, `set_fill_anchor_source`, `set_fill_channels`, and `set_active_channels` now skip unchanged sets and restore and verify bitmap, uniform-color, and Anchor sources on channels that stay active. Procedural sources block a channel change before mutation instead of being lost.
+- Fixed rollback in `set_fill_resource` and `set_fill_anchor_source`, which passed a Source object back to `set_source` and reset every channel.
+- `set_fill_resource` now accepts Fill effects inside a mask stack (omit `channel`), enabling bitmap-driven masks such as a metalness map.
+- `get_procedural_inputs` and `set_procedural_input` no longer crash on mask Fill effects, whose `source_mode` is `None`.
+- `export_textures` reports planned maps that Painter skipped (e.g. Emissive on a Texture Set without that channel) under `skipped`.
+- Added regression tests that run the Painter-side channel helper against a fake Fill reproducing the 12.1 reset behavior.
+
+### Installation and documentation
+
+- Documented running the server with `uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.1 substance-painter-mcp`, with no clone or virtual environment.
+- Added macOS instructions for installation, launching Painter with remote scripting, verifying the listener, and registering the server with Claude Desktop and Claude Code.
+- Documented `:` as the root separator on macOS, and that Painter 12.0.x lacks the geometry-mask API that 12.1 provides.
+
+### Validation
+
+- Expanded the automated suite from 64 to 67 tests.
+- Live-tested on Painter 12.1.5 for macOS (Apple silicon) in a disposable project created from an OBJ. Four sequential Fill bitmaps survived, as did repeated and widened channel sets. A mask Fill effect accepted a bitmap, and an Anchor binding preserved the existing bitmap. `Roughness` and `Metallic` were confirmed as enum aliases, and the skipped Emissive export map was reported.
+
 ## 1.0.0 - 2026-07-28
 
 Version 1.0.0 expands the server from 75 to 79 tools and completes the public Painter resource-ingestion workflow with persistent shelf support and observable indexing.
