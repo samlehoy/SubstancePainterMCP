@@ -1,6 +1,7 @@
-"""Interactive installer that registers this server with MCP clients.
+"""Interactive installer that registers this server with MCP clients, or removes it.
 
 Run with: uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@vX.Y.Z substance-painter-mcp install
+(or `uninstall`).
 """
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import shlex
 import shutil
 import subprocess
 import sys
@@ -59,11 +61,15 @@ def json_config_path(client: str) -> Path:
     raise ValueError(f"Unknown client: {client}")
 
 
+def servers_key(client: str) -> str:
+    return "mcp" if client == "opencode" else "mcpServers"
+
+
 def merge_server(
     config: dict[str, Any], client: str, command: list[str], env: dict[str, str]
 ) -> dict[str, Any]:
     """Add or replace only this server's entry; every other setting is kept."""
-    key = "mcp" if client == "opencode" else "mcpServers"
+    key = servers_key(client)
     servers = config.setdefault(key, {})
     if not isinstance(servers, dict):
         raise ValueError(f'"{key}" in the existing config is not an object')
@@ -75,27 +81,26 @@ def merge_server(
     return config
 
 
-def write_json_config(
-    path: Path, client: str, command: list[str], env: dict[str, str]
-) -> Path | None:
-    """Merge the entry into a JSON config, backing up an existing file. Returns the backup."""
-    if client == "opencode" and path.with_suffix(".jsonc").exists():
-        raise ValueError(f"{path.with_suffix('.jsonc')} exists; add the server to it manually")
-    config: dict[str, Any] = {}
+def read_json_config(path: Path) -> dict[str, Any]:
+    """Return the config object ({} when missing); refuse anything that is not plain JSON."""
+    if not path.exists():
+        return {}
+    text = path.read_text(encoding="utf-8")
+    try:
+        config = json.loads(text) if text.strip() else {}
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{path} is not plain JSON ({exc.msg}); edit it manually") from None
+    if not isinstance(config, dict):
+        raise ValueError(f"{path} does not contain a JSON object")
+    return config
+
+
+def save_json_config(path: Path, config: dict[str, Any]) -> Path | None:
+    """Back up an existing file, then write atomically. Returns the backup."""
     backup = None
     if path.exists():
-        text = path.read_text(encoding="utf-8")
-        try:
-            config = json.loads(text) if text.strip() else {}
-        except json.JSONDecodeError as exc:
-            raise ValueError(
-                f"{path} is not plain JSON ({exc.msg}); add the server manually"
-            ) from None
-        if not isinstance(config, dict):
-            raise ValueError(f"{path} does not contain a JSON object")
         backup = path.with_name(f"{path.name}.bak-{time.strftime('%Y%m%d-%H%M%S')}")
         shutil.copy2(path, backup)
-    merge_server(config, client, command, env)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f"{path.name}.tmp")
     temporary.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -103,10 +108,57 @@ def write_json_config(
     return backup
 
 
-def install_claude_code(command: list[str], env: dict[str, str]) -> None:
+def write_json_config(
+    path: Path, client: str, command: list[str], env: dict[str, str]
+) -> Path | None:
+    """Merge the entry into a JSON config, backing up an existing file. Returns the backup."""
+    if client == "opencode" and path.with_suffix(".jsonc").exists():
+        raise ValueError(f"{path.with_suffix('.jsonc')} exists; add the server to it manually")
+    config = read_json_config(path)
+    merge_server(config, client, command, env)
+    return save_json_config(path, config)
+
+
+def has_json_entry(path: Path, client: str) -> bool:
+    servers = read_json_config(path).get(servers_key(client))
+    return isinstance(servers, dict) and NAME in servers
+
+
+def remove_json_entry(path: Path, client: str) -> Path | None:
+    """Remove only this server's entry, backing up the file first. Returns the backup."""
+    config = read_json_config(path)
+    del config[servers_key(client)][NAME]
+    return save_json_config(path, config)
+
+
+def claude_cli() -> str:
     claude = shutil.which("claude")
     if not claude:
         raise FileNotFoundError("Claude Code CLI (claude) was not found on PATH")
+    return claude
+
+
+def claude_code_has_entry() -> bool:
+    """Whether Claude Code's user scope lists this server (read-only check)."""
+    path = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home()) / ".claude.json"
+    try:
+        config = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    servers = config.get("mcpServers") if isinstance(config, dict) else None
+    return isinstance(servers, dict) and NAME in servers
+
+
+def uninstall_claude_code() -> None:
+    removed = subprocess.run(
+        [claude_cli(), "mcp", "remove", NAME, "-s", "user"], capture_output=True, text=True
+    )
+    if removed.returncode:
+        raise RuntimeError((removed.stderr or removed.stdout).strip())
+
+
+def install_claude_code(command: list[str], env: dict[str, str]) -> None:
+    claude = claude_cli()
     # Replace any earlier user-scope entry; a missing entry is not an error.
     subprocess.run([claude, "mcp", "remove", NAME, "-s", "user"], capture_output=True)
     args = [claude, "mcp", "add", NAME, "-s", "user"]
@@ -151,11 +203,27 @@ def choose_clients() -> list[tuple[str, str]]:
         print(f"Enter numbers from 1 to {len(CLIENTS)}, e.g. 1,3")
 
 
+def clean_path(text: str, windows: bool = sys.platform == "win32") -> str:
+    """Accept a path typed by hand or dragged in from Finder/Explorer."""
+    text = text.strip()
+    if windows:
+        # Explorer drag-and-drop quotes paths with spaces; backslashes are separators.
+        return text.strip('"')
+    # Finder drag-and-drop escapes spaces (My\ Folder); some terminals quote instead.
+    try:
+        parts = shlex.split(text)
+    except ValueError:  # e.g. a hand-typed apostrophe
+        return text
+    return parts[0] if len(parts) == 1 else text
+
+
 def choose_folder() -> Path:
     print("Work folder: the only place the server may read meshes and images,")
     print("and write projects, backups, and exports.")
     while True:
-        folder = Path(ask("Folder", str(Path.home() / "SubstanceProjects"))).expanduser().resolve()
+        answer = clean_path(ask("Folder (type a path or drag a folder here)",
+                                str(Path.home() / "SubstanceProjects")))
+        folder = Path(answer).expanduser().resolve()
         if folder.is_dir():
             return folder
         if ask(f"{folder} does not exist. Create it? (y/N)").lower() == "y":
@@ -191,7 +259,7 @@ def run() -> int:
             path = json_config_path(client)
             target = f"{path} ({'backed up first' if path.exists() else 'new file'})"
         print(f"  {label:<15} → {target}")
-    print(f"  Server command → {' '.join(command)}")
+    print(f"  {'Server command':<15} → {' '.join(command)}")
     if ask("Continue? (y/N)").lower() != "y":
         print("Nothing was changed.")
         return 1
@@ -216,9 +284,54 @@ def run() -> int:
     return 1 if failed else 0
 
 
-def main() -> None:
+def run_uninstall() -> int:
+    print(f"Substance Painter MCP {__version__} uninstaller\n")
+    found = []
+    for client, label in CLIENTS.values():
+        try:
+            if client == "claude-code":
+                present, target = claude_code_has_entry(), "claude mcp remove -s user"
+            else:
+                path = json_config_path(client)
+                present, target = has_json_entry(path, client), f"{path} (backed up first)"
+        except ValueError as exc:
+            print(f"! {label}: {exc}")
+            continue
+        if present:
+            found.append((client, label, target))
+    if not found:
+        print("substance-painter is not configured in Claude Code (user scope), "
+              "Claude Desktop, Antigravity, or OpenCode.")
+        return 0
+
+    print("This will remove substance-painter from:")
+    for _, label, target in found:
+        print(f"  {label:<15} → {target}")
+    if ask("Continue? (y/N)").lower() != "y":
+        print("Nothing was changed.")
+        return 1
+
+    failed = 0
+    for client, label, _ in found:
+        try:
+            if client == "claude-code":
+                uninstall_claude_code()
+                print(f"✔ {label}")
+            else:
+                backup = remove_json_entry(json_config_path(client), client)
+                print(f"✔ {label} (backup: {backup.name})")
+        except Exception as exc:  # report each client independently
+            failed += 1
+            print(f"✘ {label}: {exc}")
+
+    print("\nYour work folder and Painter projects were not touched. Restart your MCP clients.")
+    print("To also delete the cached package: uv cache clean substance-painter-mcp")
+    return 1 if failed else 0
+
+
+def main(command: str = "install") -> None:
     try:
-        sys.exit(run())
+        sys.exit(run_uninstall() if command == "uninstall" else run())
     except (EOFError, KeyboardInterrupt):
         print("\nCancelled; nothing further was changed.")
         sys.exit(1)

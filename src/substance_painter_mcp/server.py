@@ -831,10 +831,10 @@ def execute_python(code: str) -> dict[str, Any]:
 
 
 def main() -> None:
-    if sys.argv[1:2] == ["install"]:
+    if sys.argv[1:2] in (["install"], ["uninstall"]):
         from .install import main as install
 
-        install()
+        install(sys.argv[1])
         return
     mcp.run(transport="stdio")
 
