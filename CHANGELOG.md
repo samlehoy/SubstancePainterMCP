@@ -18,6 +18,7 @@ Version 1.0.1 fixes Fill source handling found by live use on Painter 12.1.5 for
 ### Installation and documentation
 
 - Documented running the server with `uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.1 substance-painter-mcp`, with no clone or virtual environment.
+- Added configuration examples for `mcpServers` clients (Claude Desktop, Cursor, Antigravity) and OpenCode, plus guidance on first-run uvx startup timeouts.
 - Added macOS instructions for installation, launching Painter with remote scripting, verifying the listener, and registering the server with Claude Desktop and Claude Code.
 - Documented `:` as the root separator on macOS, and that Painter 12.0.x lacks the geometry-mask API that 12.1 provides.
 

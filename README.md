@@ -170,6 +170,50 @@ claude mcp add substance-painter \
 
 uvx caches the built package, so local code edits are not picked up. To work on the server itself, use the editable installation below.
 
+### Other MCP clients
+
+The server speaks standard MCP over stdio, so any MCP client can run it; only the configuration format differs. Clients that use an `mcpServers` object include Claude Desktop, Cursor, and Antigravity (`~/.gemini/config/mcp_config.json` globally, or `.agents/mcp_config.json` in a workspace):
+
+```json
+{
+  "mcpServers": {
+    "substance-painter": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.1", "substance-painter-mcp"],
+      "env": {
+        "SP_MCP_EXPORT_ROOTS": "/path/to/SubstanceProjects",
+        "SP_MCP_PROJECT_ROOTS": "/path/to/SubstanceProjects"
+      }
+    }
+  }
+}
+```
+
+OpenCode (`opencode.json`) takes the command as one array and the variables as `environment`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "substance-painter": {
+      "type": "local",
+      "command": ["uvx", "--from", "git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.1", "substance-painter-mcp"],
+      "environment": {
+        "SP_MCP_EXPORT_ROOTS": "/path/to/SubstanceProjects",
+        "SP_MCP_PROJECT_ROOTS": "/path/to/SubstanceProjects"
+      },
+      "timeout": 60000
+    }
+  }
+}
+```
+
+The first uvx run downloads and builds the package, which can exceed a client's startup timeout (OpenCode defaults to 5 seconds). Raise the client's timeout as above, or warm the cache once from a terminal:
+
+```bash
+uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.1 python -c "import substance_painter_mcp"
+```
+
 ## Installation
 
 Windows:
