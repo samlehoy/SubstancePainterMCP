@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.0.2 - 2026-10-12
+
+Version 1.0.2 adds an interactive installer: `uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.2 substance-painter-mcp install`.
+
+- Checks that uv is available, detects Painter (through remote scripting when running, otherwise from the macOS app bundle), and warns about versions older than 12.1.
+- Configures Claude Code (through `claude mcp add -s user`), Claude Desktop, Antigravity, and OpenCode with one approved work folder for every `SP_MCP_*_ROOTS` variable.
+- Shows every target before asking for confirmation, writes the absolute `uvx` path pinned to the installer's own release tag, and prints OS-specific instructions for launching Painter.
+- For JSON configs, adds or replaces only the `substance-painter` entry, keeps all other settings, backs up existing files, writes atomically, and refuses files that are not plain JSON (including OpenCode's `opencode.jsonc`).
+- Running `substance-painter-mcp` without arguments still starts the stdio server.
+- Added 5 installer tests (72 total) and verified the installer end to end against a sandboxed home directory.
+
 ## 1.0.1 - 2026-10-12
 
 Version 1.0.1 fixes Fill source handling found by live use on Painter 12.1.5 for macOS, and adds macOS and `uvx` installation guidance.

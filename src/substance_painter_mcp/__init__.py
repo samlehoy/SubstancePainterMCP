@@ -3,4 +3,4 @@
 from .client import PainterRemote, PainterRemoteConfig
 
 __all__ = ["PainterRemote", "PainterRemoteConfig"]
-__version__ = "1.0.1"
+__version__ = "1.0.2"

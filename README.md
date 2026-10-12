@@ -7,7 +7,7 @@
 
 An MCP server that lets AI clients inspect, audit, edit, and export from a local Adobe Substance 3D Painter project.
 
-Version **1.0.1** provides 79 focused MCP tools. It completes the guarded resource workflow with shelf discovery, persistent shelf imports, and event-driven shelf refresh jobs, on top of the planned project lifecycle, production baking, and transactional layer authoring added throughout the 0.x releases. It is live-validated against **Substance 3D Painter 12.1.1** on Windows and **12.1.5** on macOS (Apple silicon).
+Version **1.0.2** provides 79 focused MCP tools. It completes the guarded resource workflow with shelf discovery, persistent shelf imports, and event-driven shelf refresh jobs, on top of the planned project lifecycle, production baking, and transactional layer authoring added throughout the 0.x releases. It is live-validated against **Substance 3D Painter 12.1.1** on Windows and **12.1.5** on macOS (Apple silicon).
 
 > This is an independent community project and is not affiliated with or endorsed by Adobe.
 
@@ -153,10 +153,18 @@ Layer names are not unique in Painter. All mutation tools therefore use the UIDs
 
 ## Quick install (uvx)
 
-[uv](https://docs.astral.sh/uv/)'s `uvx` runs the server straight from this repository: no clone, virtual environment, or `pip install`. Install uv once (`brew install uv` on macOS, `winget install astral-sh.uv` on Windows), then use this as the MCP server command:
+[uv](https://docs.astral.sh/uv/)'s `uvx` runs the server straight from this repository: no clone, virtual environment, or `pip install`. Install uv once (`brew install uv` on macOS, `winget install astral-sh.uv` on Windows), then run the interactive installer:
+
+```bash
+uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.2 substance-painter-mcp install
+```
+
+It checks for Painter 12.1 or newer, asks which clients to configure (Claude Code, Claude Desktop, Antigravity, OpenCode) and which work folder the server may use, shows what it will write, and asks for confirmation. Claude Code is configured through `claude mcp add -s user`. For the JSON-configured clients, it adds or replaces only the `substance-painter` entry, backs up an existing file first, and refuses to modify files that are not plain JSON (for example JSONC with comments). The written command uses the absolute path to `uvx`, because GUI apps often do not inherit the shell `PATH`.
+
+To configure a client by hand instead, use this as the MCP server command:
 
 ```text
-uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.1 substance-painter-mcp
+uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.2 substance-painter-mcp
 ```
 
 Pin a release tag so every machine runs the same version. Example for Claude Code on macOS (see [Environment variables](#environment-variables) for the other roots):
@@ -165,7 +173,7 @@ Pin a release tag so every machine runs the same version. Example for Claude Cod
 claude mcp add substance-painter \
   -e SP_MCP_EXPORT_ROOTS="$HOME/SubstanceProjects" \
   -e SP_MCP_PROJECT_ROOTS="$HOME/SubstanceProjects" \
-  -- uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.1 substance-painter-mcp
+  -- uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.2 substance-painter-mcp
 ```
 
 uvx caches the built package, so local code edits are not picked up. To work on the server itself, use the editable installation below.
@@ -179,7 +187,7 @@ The server speaks standard MCP over stdio, so any MCP client can run it; only th
   "mcpServers": {
     "substance-painter": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.1", "substance-painter-mcp"],
+      "args": ["--from", "git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.2", "substance-painter-mcp"],
       "env": {
         "SP_MCP_EXPORT_ROOTS": "/path/to/SubstanceProjects",
         "SP_MCP_PROJECT_ROOTS": "/path/to/SubstanceProjects"
@@ -197,7 +205,7 @@ OpenCode (`opencode.json`) takes the command as one array and the variables as `
   "mcp": {
     "substance-painter": {
       "type": "local",
-      "command": ["uvx", "--from", "git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.1", "substance-painter-mcp"],
+      "command": ["uvx", "--from", "git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.2", "substance-painter-mcp"],
       "environment": {
         "SP_MCP_EXPORT_ROOTS": "/path/to/SubstanceProjects",
         "SP_MCP_PROJECT_ROOTS": "/path/to/SubstanceProjects"
@@ -211,7 +219,7 @@ OpenCode (`opencode.json`) takes the command as one array and the variables as `
 The first uvx run downloads and builds the package, which can exceed a client's startup timeout (OpenCode defaults to 5 seconds). Raise the client's timeout as above, or warm the cache once from a terminal:
 
 ```bash
-uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.1 python -c "import substance_painter_mcp"
+uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.2 python -c "import substance_painter_mcp"
 ```
 
 ## Installation
