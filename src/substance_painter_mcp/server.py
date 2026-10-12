@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -830,6 +831,11 @@ def execute_python(code: str) -> dict[str, Any]:
 
 
 def main() -> None:
+    if sys.argv[1:2] == ["install"]:
+        from .install import main as install
+
+        install()
+        return
     mcp.run(transport="stdio")
 
 
