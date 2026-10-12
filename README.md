@@ -1,5 +1,6 @@
 # Substance Painter MCP
 
+[![Tests](https://github.com/samlehoy/SubstancePainterMCP/actions/workflows/test.yml/badge.svg)](https://github.com/samlehoy/SubstancePainterMCP/actions/workflows/test.yml)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![MCP SDK 1.x](https://img.shields.io/badge/MCP_SDK-1.x-5A67D8)](https://github.com/modelcontextprotocol/python-sdk)
 [![Tested with Painter 12.1.1 and 12.1.5](https://img.shields.io/badge/Painter-12.1.1%20%7C%2012.1.5-99E83F)](https://www.adobe.com/products/substance3d/apps/painter.html)
