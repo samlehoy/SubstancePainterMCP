@@ -274,16 +274,129 @@ def test_advanced_projection_validation_is_local():
     assert operations.remote.calls == []
 
 
-def test_fill_resource_requires_channel_or_material_mode():
-    operations = PainterOperations(FakeRemote())
+def test_fill_resource_validates_url_and_material_mode():
+    remote = FakeRemote()
+    operations = PainterOperations(remote)
     with pytest.raises(ValueError, match="resource://"):
         operations.set_fill_resource(1, "https://example.com/a.png", "BaseColor")
-    with pytest.raises(ValueError, match="channel is required"):
-        operations.set_fill_resource(1, "resource://project/a")
     with pytest.raises(ValueError, match="must be omitted"):
         operations.set_fill_resource(
             1, "resource://project/a", "BaseColor", material_mode=True
         )
+    # Mask Fill effects take no channel; Painter decides which context applies.
+    operations.set_fill_resource(1, "resource://project/a")
+    assert remote.calls[-1][1]["channel"] is None
+
+
+class Channel:
+    def __init__(self, name):
+        self.name = name
+
+
+class ResourceID:
+    def __init__(self, url):
+        self._url = url
+
+    def url(self):
+        return self._url
+
+
+class Color:
+    def __init__(self, *value):
+        self.value_raw = value
+
+
+class SourceBitmap:
+    def __init__(self, resource_id):
+        self.resource_id = resource_id
+
+
+class SourceUniformColor:
+    def __init__(self, color):
+        self._color = color
+
+    def get_color(self):
+        return self._color
+
+
+class SourceSubstance:
+    pass
+
+
+class SplitMode:
+    name = "Split"
+
+
+class PainterLikeFill:
+    """Mimics Painter 12.1: any active_channels assignment recreates every source."""
+
+    source_mode = SplitMode()
+
+    def __init__(self, sources):
+        self.sources = dict(sources)
+
+    @property
+    def active_channels(self):
+        return set(self.sources)
+
+    @active_channels.setter
+    def active_channels(self, channels):
+        self.sources = {channel: SourceUniformColor(Color(0.5, 0.5, 0.5)) for channel in channels}
+
+    def get_source(self, channel):
+        return self.sources[channel]
+
+    def set_source(self, channel, value):
+        source = SourceBitmap(value) if isinstance(value, ResourceID) else SourceUniformColor(value)
+        self.sources[channel] = source
+        return source
+
+
+def _apply_active_channels():
+    from substance_painter_mcp.operations import ACTIVE_CHANNEL_HELPERS
+
+    namespace = {}
+    exec(ACTIVE_CHANNEL_HELPERS, namespace)
+    return namespace["apply_active_channels"]
+
+
+def test_sequential_fill_resources_keep_earlier_bitmaps():
+    apply_active_channels = _apply_active_channels()
+    channels = [Channel(name) for name in ("BaseColor", "SpecularRoughness", "BaseMetalness", "Normal")]
+    node = PainterLikeFill({channel: SourceUniformColor(Color(0.5, 0.5, 0.5)) for channel in channels})
+    # The set_fill_resource sequence from the bug report: one bitmap per call.
+    for channel in channels:
+        apply_active_channels(node, node.active_channels | {channel})
+        node.set_source(channel, ResourceID(f"resource://project/{channel.name}"))
+    kinds = {channel.name: type(node.get_source(channel)).__name__ for channel in channels}
+    assert kinds == dict.fromkeys(kinds, "SourceBitmap")
+    assert {channel.name: node.get_source(channel).resource_id.url() for channel in channels} == {
+        channel.name: f"resource://project/{channel.name}" for channel in channels
+    }
+
+
+def test_adding_a_channel_restores_other_sources():
+    apply_active_channels = _apply_active_channels()
+    base, roughness, normal = Channel("BaseColor"), Channel("SpecularRoughness"), Channel("Normal")
+    node = PainterLikeFill({
+        base: SourceBitmap(ResourceID("resource://project/color")),
+        roughness: SourceUniformColor(Color(0.3, 0.3, 0.3)),
+    })
+    apply_active_channels(node, {base, roughness, normal})
+    assert isinstance(node.get_source(base), SourceBitmap)
+    assert node.get_source(base).resource_id.url() == "resource://project/color"
+    assert node.get_source(roughness).get_color().value_raw == (0.3, 0.3, 0.3)
+    assert normal in node.active_channels
+
+
+def test_unrestorable_source_blocks_channel_change_before_mutation():
+    apply_active_channels = _apply_active_channels()
+    base, normal = Channel("BaseColor"), Channel("Normal")
+    procedural = SourceSubstance()
+    node = PainterLikeFill({base: procedural})
+    with pytest.raises(ValueError, match="SourceSubstance source on BaseColor"):
+        apply_active_channels(node, {base, normal})
+    assert node.get_source(base) is procedural
 
 
 def test_procedural_input_requires_exactly_one_action():

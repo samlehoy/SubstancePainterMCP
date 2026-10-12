@@ -74,6 +74,56 @@ BLOCKED_RESOURCE_EXTENSIONS = {
     ".py", ".pyc", ".pyd", ".qml", ".vbs",
 }
 
+# Painter-side helpers prepended to snippets that change a Fill's active channels.
+# Painter 12.1 recreates every channel source on any active_channels assignment,
+# even an unchanged set, so sources of channels that stay active are restored and
+# verified instead of silently falling back to defaults.
+ACTIVE_CHANNEL_HELPERS = '''
+def source_value(source):
+    kind = type(source).__name__
+    if kind == "SourceBitmap":
+        return source.resource_id
+    if kind == "SourceUniformColor":
+        return source.get_color()
+    if kind == "SourceReference":
+        return source.anchor()
+    raise ValueError(f"Cannot preserve a {kind} source")
+
+def source_key(source):
+    kind = type(source).__name__
+    if kind == "SourceBitmap":
+        return kind, source.resource_id.url()
+    if kind == "SourceUniformColor":
+        return kind, tuple(round(value, 6) for value in source.get_color().value_raw)
+    if kind == "SourceReference":
+        return kind, source.anchor().uid()
+    return kind, None
+
+def apply_active_channels(node, channels):
+    current = set(node.active_channels)
+    channels = set(channels)
+    if channels == current:
+        return
+    kept = {}
+    mode = getattr(node, "source_mode", None)
+    if mode is not None and mode.name == "Split":
+        for channel in current & channels:
+            source = node.get_source(channel)
+            try:
+                kept[channel] = (source_value(source), source_key(source))
+            except ValueError as exc:
+                raise ValueError(
+                    f"{exc} on {channel.name}; changing active channels would reset it"
+                ) from None
+    node.active_channels = channels
+    lost = sorted(
+        channel.name for channel, (value, key) in kept.items()
+        if source_key(node.set_source(channel, value)) != key
+    )
+    if lost:
+        raise RuntimeError(f"Painter did not restore channel sources: {lost}")
+'''
+
 
 def _unwrap(envelope: dict[str, Any]) -> Any:
     if envelope.get("success"):
@@ -2218,7 +2268,7 @@ result = {
             raise ValueError("channels must contain at least one channel")
         if len(set(channels)) != len(channels):
             raise ValueError("channels must not contain duplicates")
-        code = '''
+        code = ACTIVE_CHANNEL_HELPERS + '''
 import substance_painter.layerstack as layerstack
 import substance_painter.textureset as textureset
 
@@ -2237,7 +2287,7 @@ for requested in params["channels"]:
     if not name or name not in textureset.ChannelType.__members__:
         raise ValueError(f"Unknown channel: {requested}")
     resolved.append(textureset.ChannelType.__members__[name])
-node.active_channels = set(resolved)
+apply_active_channels(node, resolved)
 result = {
     "uid": node.uid(),
     "name": node.get_name(),
@@ -2932,6 +2982,11 @@ def resolve_source(node, requested):
         if source is None:
             raise ValueError("Generator/Filter effect has no procedural source")
         return source, None
+    if node.source_mode is None:
+        # A Fill effect inside a mask stack has a single, channel-less source.
+        if requested is not None:
+            raise ValueError("channel must be omitted for a Fill effect inside a mask")
+        return node.get_source(None), None
     if node.source_mode.name == "Material":
         if requested is not None:
             raise ValueError("channel must be omitted for a material-mode Fill")
@@ -3028,6 +3083,11 @@ def resolve_source(node, requested):
         if source is None:
             raise ValueError("Generator/Filter effect has no procedural source")
         return source, None
+    if node.source_mode is None:
+        # A Fill effect inside a mask stack has a single, channel-less source.
+        if requested is not None:
+            raise ValueError("channel must be omitted for a Fill effect inside a mask")
+        return node.get_source(None), None
     if node.source_mode.name == "Material":
         if requested is not None:
             raise ValueError("channel must be omitted for a material-mode Fill")
@@ -3149,51 +3209,56 @@ result = {
             raise ValueError("resource_url must start with resource://")
         if material_mode and channel is not None:
             raise ValueError("channel must be omitted when material_mode=true")
-        if not material_mode and not channel:
-            raise ValueError("channel is required when material_mode=false")
-        code = '''
+        code = ACTIVE_CHANNEL_HELPERS + '''
 import substance_painter.layerstack as layerstack
 import substance_painter.resource as resource
 import substance_painter.textureset as textureset
 
 node = layerstack.get_node_by_uid(params["uid"])
-if not isinstance(node, layerstack.FillLayerNode):
-    raise TypeError(f"Node {params['uid']} is not a FillLayerNode")
+if not isinstance(node, (layerstack.FillLayerNode, layerstack.FillEffectNode)):
+    raise TypeError(f"Node {params['uid']} is not a Fill layer or Fill effect")
 resource_id = resource.ResourceID.from_url(params["resource_url"])
-aliases = {"Roughness": "SpecularRoughness", "Metallic": "BaseMetalness", "Emission": "Emissive"}
 requested = params["channel"]
-channel_name = None if params["material_mode"] else (
-    requested if requested in textureset.ChannelType.__members__ else aliases.get(requested)
-)
-if not params["material_mode"] and (
-    not channel_name or channel_name not in textureset.ChannelType.__members__
-):
-    raise ValueError(f"Unknown channel: {requested}")
-resolved = textureset.ChannelType.__members__[channel_name] if channel_name else None
-original_channels = set(node.active_channels)
-original_source = node.get_source(resolved) if resolved in original_channels else None
-try:
-    if params["material_mode"]:
-        source = node.set_material_source(resource_id)
-        resolved_channel = None
-    else:
-        node.active_channels = original_channels | {resolved}
+resolved_channel = None
+if node.source_mode is None:
+    # A Fill effect inside a mask stack has a single, channel-less source.
+    if requested is not None or params["material_mode"]:
+        raise ValueError("Omit channel and material_mode for a Fill effect inside a mask")
+    source = node.set_source(None, resource_id)
+elif params["material_mode"]:
+    source = node.set_material_source(resource_id)
+else:
+    if not requested:
+        raise ValueError("channel is required when material_mode=false")
+    aliases = {"Roughness": "SpecularRoughness", "Metallic": "BaseMetalness", "Emission": "Emissive"}
+    channel_name = requested if requested in textureset.ChannelType.__members__ else aliases.get(requested)
+    if not channel_name or channel_name not in textureset.ChannelType.__members__:
+        raise ValueError(f"Unknown channel: {requested}")
+    resolved = textureset.ChannelType.__members__[channel_name]
+    original_channels = set(node.active_channels)
+    original_value = None
+    if resolved in original_channels:
+        try:
+            original_value = source_value(node.get_source(resolved))
+        except ValueError:
+            pass
+    try:
+        apply_active_channels(node, original_channels | {resolved})
         source = node.set_source(resolved, resource_id)
-        resolved_channel = resolved.name
-except Exception:
-    if resolved is not None:
-        if original_source is not None:
-            try:
-                node.set_source(resolved, original_source)
-            except Exception:
-                pass
-        node.active_channels = original_channels
-    raise
+    except Exception:
+        try:
+            if original_value is not None:
+                node.set_source(resolved, original_value)
+            apply_active_channels(node, original_channels)
+        except Exception:
+            pass
+        raise
+    resolved_channel = resolved.name
 verified_id = getattr(source, "resource_id", None)
 result = {
     "uid": node.uid(),
     "name": node.get_name(),
-    "source_mode": node.source_mode.name,
+    "source_mode": getattr(node.source_mode, "name", None),
     "channel": resolved_channel,
     "source_type": type(source).__name__,
     "resource_url": verified_id.url() if verified_id else params["resource_url"],
@@ -3512,7 +3577,7 @@ result = {"count": len(anchors), "anchors": anchors}
             raise ValueError("channel must be omitted when material_mode=true")
         if not material_mode and not channel:
             raise ValueError("channel is required when material_mode=false")
-        code = '''
+        code = ACTIVE_CHANNEL_HELPERS + '''
 import substance_painter.layerstack as layerstack
 import substance_painter.textureset as textureset
 
@@ -3535,17 +3600,22 @@ else:
         raise ValueError(f"Unknown channel: {requested}")
     resolved = textureset.ChannelType.__members__[channel_name]
     original_channels = set(node.active_channels)
-    original_source = node.get_source(resolved) if resolved in original_channels else None
+    original_value = None
+    if resolved in original_channels:
+        try:
+            original_value = source_value(node.get_source(resolved))
+        except ValueError:
+            pass
     try:
-        node.active_channels = original_channels | {resolved}
+        apply_active_channels(node, original_channels | {resolved})
         source = node.set_source(resolved, anchor)
     except Exception:
-        if original_source is not None:
-            try:
-                node.set_source(resolved, original_source)
-            except Exception:
-                pass
-        node.active_channels = original_channels
+        try:
+            if original_value is not None:
+                node.set_source(resolved, original_value)
+            apply_active_channels(node, original_channels)
+        except Exception:
+            pass
         raise
     resolved_channel = resolved.name
 result = {
@@ -3607,7 +3677,7 @@ result = {
             color = [float(value)] * 3 if isinstance(value, (int, float)) else list(value)
             self._validate_color(color)
             normalized[channel] = color
-        code = '''
+        code = ACTIVE_CHANNEL_HELPERS + '''
 import substance_painter.colormanagement as colormanagement
 import substance_painter.layerstack as layerstack
 import substance_painter.textureset as textureset
@@ -3620,7 +3690,7 @@ for name, color in params["values"].items():
     if name not in textureset.ChannelType.__members__:
         raise ValueError(f"Unknown channel: {name}")
     resolved[textureset.ChannelType.__members__[name]] = color
-node.active_channels = set(node.active_channels) | set(resolved)
+apply_active_channels(node, set(node.active_channels) | set(resolved))
 verified = {}
 for channel, color in resolved.items():
     source = node.set_source(channel, colormanagement.Color(*color))
@@ -3892,6 +3962,9 @@ result = {
 '''
         result = _unwrap(self.remote.execute_python_json(code, {"config": plan["config"]}))
         result["preset"] = plan["preset"]
+        # Painter's plan lists preset maps whose source channel the Texture Set lacks
+        # (e.g. Emissive); the export silently skips them.
+        result["skipped"] = sorted(set(plan["files"]) - set(result["files"]))
         result["verification"] = [
             {
                 "path": path,

@@ -522,7 +522,10 @@ def set_fill_resource(
     channel: str | None = None,
     material_mode: bool = False,
 ) -> dict[str, Any]:
-    """Assign a Painter resource to one Fill channel or to the whole material."""
+    """Assign a resource to one Fill channel, the whole material, or a mask Fill effect.
+
+    Omit channel for a Fill effect inside a mask stack (e.g. a bitmap-driven mask).
+    """
     return operations.set_fill_resource(uid, resource_url, channel, material_mode)
 
 
@@ -634,7 +637,11 @@ def plan_texture_export(
     file_format: str | None = None,
     bit_depth: str | None = None,
 ) -> dict[str, Any]:
-    """Validate an export and list exact output files without writing them."""
+    """Validate an export and list output files without writing them.
+
+    Painter may list preset maps for channels the Texture Set lacks (e.g. Emissive);
+    export_textures skips those and reports them under "skipped".
+    """
     return operations.plan_texture_export(
         output_directory, preset, texture_sets, size_log2, file_format, bit_depth
     )
