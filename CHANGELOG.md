@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.0.4 - 2026-10-13
+
+Version 1.0.4 makes the installer interactive and bilingual.
+
+- The installer and uninstaller first ask for a language: English or Bahasa Indonesia. Every prompt, hint, and result is translated (`install_messages.py`). Answered prompts are replaced by translated summary lines, so questionary's built-in English words never appear.
+- In a terminal, the installer shows a framed header and three numbered steps: Assistants, Work folder, and Review.
+- Assistants are picked with ↑/↓ and Space. Each one is marked `installed` or `not detected`, already-installed assistants start selected, and Claude Code is disabled when the `claude` command is missing.
+- The work-folder step explains drag and drop from Finder or File Explorer. The input starts empty, so a dragged-in path is not appended to a default; the suggested folder appears as a placeholder, and Tab completes typed paths.
+- After a folder is chosen, the installer reports how many meshes and images it holds, offers to create a missing folder, and warns before approving a home directory or a drive root.
+- The uninstaller uses the same styling. Results are colored, and Painter's launch command is highlighted.
+- Without an interactive terminal (piped input, CI), both commands fall back to plain text prompts.
+- Added the `questionary` dependency (with `prompt_toolkit`, about 0.5 MB). Only the installer imports it.
+- Added 6 tests (87 total). They drive arrow-key selection, the language choice, and a bracketed-paste folder drop through prompt_toolkit's pipe input, and check that every message has both languages with matching placeholders. The README example was recorded from a real pseudo-terminal session.
+
 ## 1.0.3 - 2026-10-12
 
 - Added `substance-painter-mcp uninstall`. It finds the `substance-painter` entry in Claude Code (user scope), Claude Desktop, Antigravity, and OpenCode, shows what it will remove, and asks for confirmation. Only that entry is removed: Claude Code through `claude mcp remove -s user`, and JSON configs with a backup and an atomic write. Work folders and projects are never touched.
