@@ -38,47 +38,11 @@ It first asks for a language (English or Bahasa Indonesia), then walks you throu
 <details>
 <summary>Example session (macOS)</summary>
 
-```text
-╭───────────────────────────────────────────╮
-│  Substance Painter MCP · installer 1.1.1  │
-╰───────────────────────────────────────────╯
-✔ Painter 12.1.5 found
+![The installer's first step: choosing assistants with the arrow keys and Space](docs/images/installer-step1.png)
 
-Step 1 of 3 · Assistants
-? Which assistants should use Substance Painter? (↑↓ move · space select · enter confirm)
-   ● Claude Code
-   ○ Claude Desktop  not detected
- » ● Antigravity
-   ○ OpenCode
-```
+After selecting Antigravity, dragging a folder in, and pressing Y:
 
-After selecting, then dragging a folder in and pressing Y:
-
-```text
-Step 1 of 3 · Assistants
-  ✔ Claude Code, Antigravity
-
-Step 2 of 3 · Work folder
-  The assistant can only read and write files inside this folder:
-  meshes, reference images, projects, backups, and exports.
-
-  Tip: drag the folder from Finder into this window, then press Enter.
-       Or type a path (Tab completes). Leave it empty for ~/SubstanceProjects.
-  ✔ ~/Documents/project/My Forge · 1 mesh, 4 images
-
-Step 3 of 3 · Review
-  Claude Code    claude mcp add -s user
-  Antigravity    ~/.gemini/config/mcp_config.json (backed up first)
-  Work folder    ~/Documents/project/My Forge
-
-  ✔ Claude Code
-  ✔ Antigravity  backup: mcp_config.json.bak-20261013-113701
-
-Next steps
-  1. Quit Painter completely, then start it with remote scripting:
-     open -a "/Applications/Adobe Substance 3D Painter/Adobe Substance 3D Painter.app" --args --enable-remote-scripting
-  2. Restart your assistant and ask: "Check the Substance Painter status."
-```
+![The finished installer: work folder with mesh and image counts, review, backup, and next steps](docs/images/installer-done.png)
 
 </details>
 
@@ -237,49 +201,13 @@ Installer menanyakan bahasa dulu (English atau Bahasa Indonesia), lalu memandu A
 - **Tinjau**: periksa perubahannya, lalu tekan Y. File config yang sudah ada di-backup dulu, dan hanya entry `substance-painter` yang diubah.
 
 <details>
-<summary>Contoh sesi (macOS)</summary>
+<summary>Contoh sesi (macOS, tampilan bahasa Inggris)</summary>
 
-```text
-╭───────────────────────────────────────────╮
-│  Substance Painter MCP · instalasi 1.1.1  │
-╰───────────────────────────────────────────╯
-✔ Painter 12.1.5 ditemukan
+![Langkah pertama installer: memilih asisten dengan tombol panah dan Spasi](docs/images/installer-step1.png)
 
-Langkah 1 dari 3 · Asisten
-? Asisten mana yang akan memakai Substance Painter? (↑↓ pindah · spasi pilih · enter lanjut)
-   ● Claude Code
-   ○ Claude Desktop  tidak terdeteksi
- » ● Antigravity
-   ○ OpenCode
-```
+Setelah memilih Antigravity, menyeret folder, lalu menekan Y:
 
-Setelah memilih asisten, menyeret folder, lalu menekan Y:
-
-```text
-Langkah 1 dari 3 · Asisten
-  ✔ Claude Code, Antigravity
-
-Langkah 2 dari 3 · Folder kerja
-  Asisten hanya bisa membaca dan menulis file di dalam folder ini:
-  mesh, gambar referensi, project, backup, dan hasil export.
-
-  Tips: seret folder dari Finder ke jendela ini, lalu tekan Enter.
-        Atau ketik path-nya (Tab melengkapi). Kosongkan untuk memakai ~/SubstanceProjects.
-  ✔ ~/Documents/project/My Forge · 1 mesh, 4 gambar
-
-Langkah 3 dari 3 · Tinjau
-  Claude Code    claude mcp add -s user
-  Antigravity    ~/.gemini/config/mcp_config.json (di-backup dulu)
-  Folder kerja   ~/Documents/project/My Forge
-
-  ✔ Claude Code
-  ✔ Antigravity  backup: mcp_config.json.bak-20261013-113701
-
-Langkah berikutnya
-  1. Tutup Painter sepenuhnya, lalu buka lagi dengan remote scripting:
-     open -a "/Applications/Adobe Substance 3D Painter/Adobe Substance 3D Painter.app" --args --enable-remote-scripting
-  2. Restart asisten Anda, lalu minta: "Cek status Substance Painter."
-```
+![Installer selesai: folder kerja dengan jumlah mesh dan gambar, tinjauan, backup, dan langkah berikutnya](docs/images/installer-done.png)
 
 </details>
 
