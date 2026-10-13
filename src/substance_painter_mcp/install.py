@@ -19,6 +19,7 @@ from typing import Any
 
 from . import __version__
 from .client import PainterRemote, PainterRemoteConfig, PainterRemoteError
+from .install_messages import MESSAGES
 
 
 REPO = "https://github.com/samlehoy/SubstancePainterMCP"
@@ -31,11 +32,20 @@ ROOT_VARS = (
     "SP_MCP_RESOURCE_ROOTS",
 )
 CLIENTS = {
-    "1": ("claude-code", "Claude Code"),
-    "2": ("claude-desktop", "Claude Desktop"),
-    "3": ("antigravity", "Antigravity"),
-    "4": ("opencode", "OpenCode"),
+    "claude-code": "Claude Code",
+    "claude-desktop": "Claude Desktop",
+    "antigravity": "Antigravity",
+    "opencode": "OpenCode",
 }
+MAC_APPS = {
+    "claude-desktop": Path("/Applications/Claude.app"),
+    "antigravity": Path("/Applications/Antigravity.app"),
+}
+MESH_EXTENSIONS = {
+    ".fbx", ".obj", ".dae", ".ply", ".abc", ".usd", ".usda", ".usdc", ".usdz", ".gltf", ".glb",
+}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tga", ".tif", ".tiff", ".exr", ".bmp", ".psd", ".hdr"}
+FILE_MANAGERS = {"darwin": "Finder", "win32": "File Explorer"}
 MAC_PAINTER = Path("/Applications/Adobe Substance 3D Painter/Adobe Substance 3D Painter.app")
 WINDOWS_PAINTER = Path(
     r"C:\Program Files\Adobe\Adobe Substance 3D Painter\Adobe Substance 3D Painter.exe"
@@ -187,20 +197,12 @@ def launch_hint() -> str:
     return f'"{WINDOWS_PAINTER}" --enable-remote-scripting'
 
 
-def ask(prompt: str, default: str = "") -> str:
-    suffix = f" [{default}]" if default else ""
-    return input(f"{prompt}{suffix}: ").strip() or default
-
-
-def choose_clients() -> list[tuple[str, str]]:
-    print("Install into which clients? (comma-separated)")
-    for number, (_, label) in CLIENTS.items():
-        print(f"  {number}) {label}")
-    while True:
-        picked = [item.strip() for item in ask("Numbers").split(",") if item.strip()]
-        if picked and all(item in CLIENTS for item in picked):
-            return [CLIENTS[item] for item in dict.fromkeys(picked)]
-        print(f"Enter numbers from 1 to {len(CLIENTS)}, e.g. 1,3")
+def display(path: Path | str) -> str:
+    """Shorten the home directory to ~ (macOS/Linux) for readability."""
+    text, home = str(path), str(Path.home())
+    if sys.platform != "win32" and (text == home or text.startswith(home + os.sep)):
+        return "~" + text[len(home):]
+    return text
 
 
 def clean_path(text: str, windows: bool = sys.platform == "win32") -> str:
@@ -217,121 +219,362 @@ def clean_path(text: str, windows: bool = sys.platform == "win32") -> str:
     return parts[0] if len(parts) == 1 else text
 
 
-def choose_folder() -> Path:
-    print("Work folder: the only place the server may read meshes and images,")
-    print("and write projects, backups, and exports.")
-    while True:
-        answer = clean_path(ask("Folder (type a path or drag a folder here)",
-                                str(Path.home() / "SubstanceProjects")))
-        folder = Path(answer).expanduser().resolve()
-        if folder.is_dir():
-            return folder
-        if ask(f"{folder} does not exist. Create it? (y/N)").lower() == "y":
-            folder.mkdir(parents=True)
-            return folder
+def folder_summary(folder: Path, limit: int = 5000) -> tuple[int, int, bool]:
+    """Count meshes and images in a folder; the bool says the scan stopped at `limit` files."""
+    meshes = images = seen = 0
+    for _, dirs, files in os.walk(folder):
+        dirs[:] = [name for name in dirs if not name.startswith(".")]
+        for name in files:
+            suffix = os.path.splitext(name)[1].lower()
+            meshes += suffix in MESH_EXTENSIONS
+            images += suffix in IMAGE_EXTENSIONS
+        seen += len(files)
+        if seen >= limit:
+            return meshes, images, True
+    return meshes, images, False
 
 
-def run() -> int:
-    print(f"Substance Painter MCP {__version__} installer\n")
+def is_broad(folder: Path) -> bool:
+    """Whether approving the folder would expose the whole home directory or a drive."""
+    home = Path.home().resolve()
+    return folder == home or folder in home.parents or folder == Path(folder.anchor)
+
+
+def client_options() -> list[tuple[str, str, str | None, bool, str | None]]:
+    """(client, label, note key, installed, disabled-reason key) for every supported client."""
+    options = []
+    for client, label in CLIENTS.items():
+        disabled = None
+        if client == "claude-code":
+            installed = claude_code_has_entry()
+            detected = shutil.which("claude") is not None
+            disabled = None if detected else "note.no_claude"
+        else:
+            path = json_config_path(client)
+            try:
+                installed = has_json_entry(path, client)
+            except ValueError:  # unreadable config; installing reports why
+                installed = False
+            detected = (
+                path.parent.exists()
+                or (sys.platform == "darwin" and client in MAC_APPS and MAC_APPS[client].exists())
+                or (client == "opencode" and shutil.which("opencode") is not None)
+            )
+        note = "note.installed" if installed else None if detected else "note.not_detected"
+        options.append((client, label, note, installed, disabled))
+    return options
+
+
+class Console:
+    """Arrow-key prompts and colors in an interactive terminal; plain text otherwise."""
+
+    def __init__(self, fancy: bool | None = None, lang: str = "en", **io: Any):
+        if fancy is None:
+            fancy = sys.stdin.isatty() and sys.stdout.isatty()
+        self.fancy = fancy
+        self.lang = lang
+        # prompt_toolkit input/output overrides (tests). Answered prompts are erased and
+        # replaced by translated summary lines, since questionary's own are English-only.
+        self.io = {**io, "erase_when_done": True}
+        if fancy:
+            try:
+                import questionary
+            except ImportError:
+                self.fancy = False
+                return
+            self.style = questionary.Style([
+                ("qmark", "fg:ansigreen bold"),
+                ("question", "bold"),
+                ("answer", "fg:ansigreen bold"),
+                ("pointer", "fg:ansigreen bold"),
+                ("highlighted", "fg:ansigreen bold"),
+                ("selected", "fg:ansigreen"),
+                ("instruction", "fg:ansibrightblack"),
+                ("disabled", "fg:ansibrightblack italic"),
+                ("accent", "fg:ansigreen bold"),
+                ("title", "bold"),
+                ("dim", "fg:ansibrightblack"),
+                ("ok", "fg:ansigreen bold"),
+                ("warn", "fg:ansiyellow bold"),
+                ("fail", "fg:ansired bold"),
+                ("code", "fg:ansicyan"),
+            ])
+
+    def t(self, key: str, **values: Any) -> str:
+        english, indonesian = MESSAGES[key]
+        return (indonesian if self.lang == "id" else english).format(**values)
+
+    def say(self, *parts: str | tuple[str, str]) -> None:
+        """Print one line; a (style, text) part is colored in an interactive terminal."""
+        if not self.fancy:
+            print("".join(part if isinstance(part, str) else part[1] for part in parts))
+            return
+        from prompt_toolkit import print_formatted_text
+        from prompt_toolkit.formatted_text import FormattedText
+
+        tokens = [("", part) if isinstance(part, str) else (f"class:{part[0]}", part[1])
+                  for part in parts]
+        print_formatted_text(FormattedText(tokens), style=self.style, output=self.io.get("output"))
+
+    def choose_language(self) -> None:
+        if self.fancy:
+            import questionary
+
+            self.lang = questionary.select(
+                "Language / Bahasa",
+                choices=[questionary.Choice("English", "en"),
+                         questionary.Choice("Bahasa Indonesia", "id")],
+                instruction="(↑↓ · enter)",
+                style=self.style,
+                **self.io,
+            ).unsafe_ask()
+            return
+        self.say("Language / Bahasa:  1) English  2) Bahasa Indonesia")
+        self.lang = "id" if self.ask("1/2", "1") in {"2", "id"} else "en"
+
+    def header(self, title_key: str) -> None:
+        text = f"Substance Painter MCP · {self.t(title_key)} {__version__}"
+        if not self.fancy:
+            self.say(text)
+            return
+        bar = "─" * (len(text) + 4)
+        self.say(("accent", f"╭{bar}╮"))
+        self.say(("accent", "│  "), ("title", text), ("accent", "  │"))
+        self.say(("accent", f"╰{bar}╯"))
+
+    def step(self, number: int, title_key: str) -> None:
+        self.say()
+        self.say(("accent", self.t("step", number=number)), ("dim", " · "), ("title", self.t(title_key)))
+
+    def ask(self, prompt: str, default: str = "") -> str:
+        suffix = f" [{default}]" if default else ""
+        return input(f"{prompt}{suffix}: ").strip() or default
+
+    def confirm(self, question: str, default: bool) -> bool:
+        if self.fancy:
+            import questionary
+
+            return questionary.confirm(
+                question, default=default, style=self.style, **self.io
+            ).unsafe_ask()
+        answer = input(f"{question} ({'Y/n' if default else 'y/N'}): ").strip().lower()
+        return answer.startswith("y") if answer else default
+
+    def choose_clients(
+        self, options: list[tuple[str, str, str | None, bool, str | None]]
+    ) -> list[str]:
+        if self.fancy:
+            import questionary
+
+            choices = [
+                questionary.Choice(
+                    title=[("class:text", label)]
+                    + ([("class:dim", f"  {self.t(note)}")] if note else []),
+                    value=client,
+                    checked=installed and not disabled,
+                    disabled=self.t(disabled) if disabled else None,
+                )
+                for client, label, note, installed, disabled in options
+            ]
+            return questionary.checkbox(
+                self.t("clients.question"),
+                choices=choices,
+                instruction=self.t("clients.instruction"),
+                validate=lambda picked: bool(picked) or self.t("clients.none"),
+                style=self.style,
+                **self.io,
+            ).unsafe_ask()
+        for number, (_, label, note, _, disabled) in enumerate(options, 1):
+            extra = disabled or note
+            self.say(f"  {number}) {label}" + (f" ({self.t(extra)})" if extra else ""))
+        allowed = {str(number): option[0] for number, option in enumerate(options, 1)
+                   if not option[4]}
+        while True:
+            picked = [item.strip() for item in self.ask(self.t("clients.numbers")).split(",")
+                      if item.strip()]
+            if picked and all(item in allowed for item in picked):
+                return [allowed[item] for item in dict.fromkeys(picked)]
+            self.say(self.t("clients.invalid", numbers=", ".join(allowed)))
+
+    def ask_folder(self, suggestion: Path) -> Path:
+        """Ask for a folder (typed or dragged in); empty input uses the suggestion."""
+
+        def check(text: str) -> bool | str:
+            if not text.strip():
+                return True
+            folder = Path(clean_path(text)).expanduser()
+            if folder.is_dir() or (not folder.exists() and folder.parent.is_dir()):
+                return True
+            return self.t("folder.is_file") if folder.exists() else self.t("folder.no_parent")
+
+        while True:
+            if self.fancy:
+                import questionary
+
+                answer = questionary.path(
+                    self.t("folder.prompt"),
+                    only_directories=True,
+                    validate=check,
+                    style=self.style,
+                    # Start empty so a dragged-in path is not appended to a default.
+                    placeholder=[("class:dim", display(suggestion))],
+                    complete_while_typing=False,
+                    **self.io,
+                ).unsafe_ask()
+            else:
+                answer = self.ask(self.t("folder.prompt"), display(suggestion))
+                problem = check(answer)
+                if problem is not True:
+                    self.say(f"  {problem}")
+                    continue
+            folder = Path(clean_path(answer) if answer.strip() else str(suggestion))
+            folder = folder.expanduser().resolve()
+            if not folder.exists():
+                if not self.confirm(self.t("folder.create", folder=display(folder)), default=True):
+                    continue
+                folder.mkdir(parents=True)
+            if is_broad(folder) and not self.confirm(
+                self.t("folder.broad", folder=display(folder)), default=False
+            ):
+                continue
+            return folder
+
+    def folder_text(self, meshes: int, images: int, truncated: bool) -> str:
+        if not meshes and not images:
+            return self.t("folder.empty")
+        more = "+" if truncated else ""
+        if self.lang == "id":
+            return f"{meshes}{more} mesh, {images}{more} gambar"
+        return (f"{meshes}{more} mesh{'' if meshes == 1 else 'es'}, "
+                f"{images}{more} image{'' if images == 1 else 's'}")
+
+
+def run(console: Console) -> int:
+    console.choose_language()
+    console.header("title.installer")
     uvx = shutil.which("uvx")
     if not uvx:
-        print("uv is required: install it with `brew install uv` (macOS) or "
-              "`winget install astral-sh.uv` (Windows), then run this again.")
+        console.say(("fail", console.t("uv.missing")), console.t("uv.how"))
         return 1
     version = painter_version()
     if version is None:
-        print("! Substance 3D Painter was not detected; install 12.1 or newer.")
+        console.say(("warn", "! "), console.t("painter.missing"))
     elif tuple(int(part) for part in version.split(".")[:2]) < (12, 1):
-        print(f"! Painter {version} found; 12.1 or newer is required for every tool.")
+        console.say(("warn", "! "), console.t("painter.old", version=version))
     else:
-        print(f"✔ Painter {version} found")
-    print()
-    clients = choose_clients()
-    folder = choose_folder()
+        console.say(("ok", "✔ "), console.t("painter.ok", version=version))
+
+    console.step(1, "step.assistants")
+    clients = console.choose_clients(client_options())
+    console.say(("ok", "  ✔ "), ", ".join(CLIENTS[client] for client in clients))
+
+    suggestion = Path.home() / "SubstanceProjects"
+    tip = console.t("folder.tip")
+    console.step(2, "step.folder")
+    console.say(f"  {console.t('folder.explain')}")
+    console.say(f"  {console.t('folder.contents')}")
+    console.say()
+    file_manager = FILE_MANAGERS.get(sys.platform) or console.t("folder.file_manager")
+    console.say(("accent", f"  {tip}"), console.t("folder.drag", file_manager=file_manager))
+    console.say(("dim", "  " + " " * len(tip) + console.t("folder.type", suggestion=display(suggestion))))
+    folder = console.ask_folder(suggestion)
+    console.say(("ok", "  ✔ "), display(folder),
+                ("dim", f" · {console.folder_text(*folder_summary(folder))}"))
+
     command = server_command(uvx)
     env = {"SP_MCP_TIMEOUT": "120", **dict.fromkeys(ROOT_VARS, str(folder))}
-
-    print("\nThis will write:")
-    for client, label in clients:
+    console.step(3, "step.review")
+    for client in clients:
         if client == "claude-code":
             target = "claude mcp add -s user"
         else:
             path = json_config_path(client)
-            target = f"{path} ({'backed up first' if path.exists() else 'new file'})"
-        print(f"  {label:<15} → {target}")
-    print(f"  {'Server command':<15} → {' '.join(command)}")
-    if ask("Continue? (y/N)").lower() != "y":
-        print("Nothing was changed.")
+            state = console.t("review.backed_up" if path.exists() else "review.new_file")
+            target = f"{display(path)} ({state})"
+        console.say(f"  {CLIENTS[client]:<15}", ("dim", target))
+    console.say(f"  {console.t('review.folder'):<15}", ("dim", display(folder)))
+    if not console.confirm(console.t("review.confirm"), default=True):
+        console.say(console.t("nothing_changed"))
         return 1
 
+    console.say()
     failed = 0
-    for client, label in clients:
+    for client in clients:
         try:
             if client == "claude-code":
                 install_claude_code(command, env)
-                print(f"✔ {label}")
+                backup = None
             else:
                 backup = write_json_config(json_config_path(client), client, command, env)
-                print(f"✔ {label}" + (f" (backup: {backup.name})" if backup else ""))
+            console.say(("ok", "  ✔ "), CLIENTS[client],
+                        ("dim", "  " + console.t("backup", name=backup.name)) if backup else "")
         except Exception as exc:  # report each client independently
             failed += 1
-            print(f"✘ {label}: {exc}")
+            console.say(("fail", "  ✘ "), f"{CLIENTS[client]}: {exc}")
 
-    print("\nNext steps:")
-    print("  1. Quit Painter completely, then start it with remote scripting:")
-    print(f"     {launch_hint()}")
-    print("  2. Restart your MCP client and ask it to check the Painter status.")
+    console.say()
+    console.say(("title", console.t("next.title")))
+    console.say(f"  {console.t('next.painter')}")
+    console.say(("code", f"     {launch_hint()}"))
+    console.say(f"  {console.t('next.ask')}")
     return 1 if failed else 0
 
 
-def run_uninstall() -> int:
-    print(f"Substance Painter MCP {__version__} uninstaller\n")
+def run_uninstall(console: Console) -> int:
+    console.choose_language()
+    console.header("title.uninstaller")
     found = []
-    for client, label in CLIENTS.values():
+    for client, label in CLIENTS.items():
         try:
             if client == "claude-code":
                 present, target = claude_code_has_entry(), "claude mcp remove -s user"
             else:
                 path = json_config_path(client)
-                present, target = has_json_entry(path, client), f"{path} (backed up first)"
+                present = has_json_entry(path, client)
+                target = f"{display(path)} ({console.t('review.backed_up')})"
         except ValueError as exc:
-            print(f"! {label}: {exc}")
+            console.say(("warn", "! "), f"{label}: {exc}")
             continue
         if present:
             found.append((client, label, target))
     if not found:
-        print("substance-painter is not configured in Claude Code (user scope), "
-              "Claude Desktop, Antigravity, or OpenCode.")
+        console.say(console.t("uninstall.none"))
         return 0
 
-    print("This will remove substance-painter from:")
+    console.say()
+    console.say(("title", console.t("uninstall.found")))
     for _, label, target in found:
-        print(f"  {label:<15} → {target}")
-    if ask("Continue? (y/N)").lower() != "y":
-        print("Nothing was changed.")
+        console.say(f"  {label:<15}", ("dim", target))
+    if not console.confirm(console.t("uninstall.confirm"), default=False):
+        console.say(console.t("nothing_changed"))
         return 1
 
+    console.say()
     failed = 0
     for client, label, _ in found:
         try:
             if client == "claude-code":
                 uninstall_claude_code()
-                print(f"✔ {label}")
+                backup = None
             else:
                 backup = remove_json_entry(json_config_path(client), client)
-                print(f"✔ {label} (backup: {backup.name})")
+            console.say(("ok", "  ✔ "), label,
+                        ("dim", "  " + console.t("backup", name=backup.name)) if backup else "")
         except Exception as exc:  # report each client independently
             failed += 1
-            print(f"✘ {label}: {exc}")
+            console.say(("fail", "  ✘ "), f"{label}: {exc}")
 
-    print("\nYour work folder and Painter projects were not touched. Restart your MCP clients.")
-    print("To also delete the cached package: uv cache clean substance-painter-mcp")
+    console.say()
+    console.say(console.t("uninstall.untouched"))
+    console.say(("dim", console.t("uninstall.cache")))
     return 1 if failed else 0
 
 
 def main(command: str = "install") -> None:
+    console = Console()
     try:
-        sys.exit(run_uninstall() if command == "uninstall" else run())
+        sys.exit(run_uninstall(console) if command == "uninstall" else run(console))
     except (EOFError, KeyboardInterrupt):
-        print("\nCancelled; nothing further was changed.")
+        console.say()
+        console.say(("warn", console.t("cancelled")))
         sys.exit(1)
