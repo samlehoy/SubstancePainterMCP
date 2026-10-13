@@ -20,6 +20,15 @@ mcp = FastMCP(
     ),
 )
 operations = PainterOperations(PainterRemote())
+RECIPE_FORMAT = """
+
+Recipe items: {"type": "fill" | "paint" | "group", "name": str, "visible": bool,
+"active_channels": [channel, ...], "channels": {channel: number | [r, g, b] | "resource://..."},
+"base_color": [r, g, b], "mask": {"background": "Black" | "White", "enabled": bool,
+"fill": "resource://..."}, "children": [item, ...]}. channels and base_color apply to fill
+items, children to groups. A resource URL assigns that bitmap; mask.fill adds a Fill effect
+with that bitmap to the mask.
+"""
 
 
 @mcp.tool()
@@ -394,7 +403,10 @@ def create_paint_layer(name: str, texture_set: str | None = None) -> dict[str, A
     return operations.create_paint_layer(name, texture_set)
 
 
-@mcp.tool()
+@mcp.tool(
+    description="Validate a recipe, resolve channels and resources, and preview backup/mutation "
+    "scope without editing." + RECIPE_FORMAT
+)
 def plan_layer_recipe(
     recipe: list[dict[str, Any]],
     texture_set: str | None = None,
@@ -402,13 +414,15 @@ def plan_layer_recipe(
     backup_mode: str = "Incremental",
     overwrite_backup: bool = False,
 ) -> dict[str, Any]:
-    """Validate a recipe, resolve channels, and preview backup/mutation scope without editing."""
     return operations.plan_layer_recipe(
         recipe, texture_set, backup_path, backup_mode, overwrite_backup
     )
 
 
-@mcp.tool()
+@mcp.tool(
+    description="Create a nested recipe atomically, optionally saving an approved .spp backup "
+    "first." + RECIPE_FORMAT
+)
 def create_layer_recipe(
     recipe: list[dict[str, Any]],
     texture_set: str | None = None,
@@ -416,7 +430,6 @@ def create_layer_recipe(
     backup_mode: str = "Incremental",
     overwrite_backup: bool = False,
 ) -> dict[str, Any]:
-    """Create a nested recipe atomically, optionally saving an approved .spp backup first."""
     return operations.create_layer_recipe(
         recipe, texture_set, backup_path, backup_mode, overwrite_backup
     )
@@ -526,6 +539,8 @@ def set_fill_resource(
     """Assign a resource to one Fill channel, the whole material, or a mask Fill effect.
 
     Omit channel for a Fill effect inside a mask stack (e.g. a bitmap-driven mask).
+    The result lists every active channel's source. To assign several channels in one
+    call, use set_fill_channels with resource:// values.
     """
     return operations.set_fill_resource(uid, resource_url, channel, material_mode)
 
@@ -555,9 +570,13 @@ def set_fill_projection_advanced(
 @mcp.tool()
 def set_fill_channels(
     uid: int,
-    values: dict[str, float | list[float]],
+    values: dict[str, float | list[float] | str],
 ) -> dict[str, Any]:
-    """Set and enable multiple uniform Fill channels, such as Roughness or Metallic."""
+    """Set and enable several Fill channels in one call; the result lists every channel's source.
+
+    Each value is a number or sRGB [r,g,b] for a uniform value, or a resource:// URL for a
+    bitmap, e.g. {"BaseColor": "resource://project0/Color", "Roughness": 0.4}.
+    """
     return operations.set_fill_channels(uid, values)
 
 
@@ -580,7 +599,10 @@ def insert_mask_effect(
     resource_url: str | None = None,
     name: str | None = None,
 ) -> dict[str, Any]:
-    """Insert Fill, Paint, Generator, Filter, Levels, Anchor, or Smart Mask content."""
+    """Insert Fill, Paint, Generator, Filter, Levels, Anchor, or Smart Mask content.
+
+    A Fill takes an optional resource_url for a bitmap-driven mask in one call.
+    """
     return operations.insert_mask_effect(uid, effect_type, resource_url, name)
 
 
@@ -697,13 +719,17 @@ def export_with_profile(
 
 @mcp.tool()
 def import_project_resource(
-    file_path: str,
+    file_path: str | list[str],
     usage: str,
-    name: str | None = None,
+    name: str | list[str | None] | None = None,
     group: str | None = None,
     confirm: bool = False,
 ) -> dict[str, Any]:
-    """Import and verify a sandboxed resource inside the open Painter project."""
+    """Import and verify sandboxed resources inside the open Painter project.
+
+    Pass a list of paths (and optionally one name per path) to import several files in one
+    call; the result then lists imported resources and per-file failures.
+    """
     return operations.import_project_resource(file_path, usage, name, group, confirm)
 
 
@@ -742,13 +768,17 @@ def get_shelf_refresh_job(job_id: str | None = None) -> dict[str, Any]:
 
 @mcp.tool()
 def import_session_resource(
-    file_path: str,
+    file_path: str | list[str],
     usage: str,
-    name: str | None = None,
+    name: str | list[str | None] | None = None,
     group: str | None = None,
     confirm: bool = False,
 ) -> dict[str, Any]:
-    """Import and verify a sandboxed resource for the current Painter session."""
+    """Import and verify sandboxed resources for the current Painter session.
+
+    Pass a list of paths (and optionally one name per path) to import several files in one
+    call; the result then lists imported resources and per-file failures.
+    """
     return operations.import_session_resource(file_path, usage, name, group, confirm)
 
 
@@ -814,8 +844,11 @@ def export_smart_mask(
 
 
 @mcp.tool()
-def delete_layer(uid: int) -> dict[str, Any]:
-    """Delete a layer or group by UID. This modifies the open project."""
+def delete_layer(uid: int | list[int]) -> dict[str, Any]:
+    """Delete layers or groups by UID; pass a list to delete several in one call.
+
+    Every UID is checked before anything is deleted. This modifies the open project.
+    """
     return operations.delete_layer(uid)
 
 

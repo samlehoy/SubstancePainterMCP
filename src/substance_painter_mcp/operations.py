@@ -74,11 +74,45 @@ BLOCKED_RESOURCE_EXTENSIONS = {
     ".py", ".pyc", ".pyd", ".qml", ".vbs",
 }
 
-# Painter-side helpers prepended to snippets that change a Fill's active channels.
+# Painter-side helpers prepended to snippets that change or report a Fill's channel sources.
 # Painter 12.1 recreates every channel source on any active_channels assignment,
 # even an unchanged set, so sources of channels that stay active are restored and
 # verified instead of silently falling back to defaults.
 ACTIVE_CHANNEL_HELPERS = '''
+def channel_value(value):
+    """A Color for an [r, g, b] list, or a verified ResourceID for a resource:// URL."""
+    import substance_painter.colormanagement as colormanagement
+    import substance_painter.resource as resource
+    if not isinstance(value, str):
+        return colormanagement.Color(*value)
+    resource_id = resource.ResourceID.from_url(value)
+    if not resource.Resource.retrieve(resource_id):
+        raise ValueError(f"Resource not found: {value}")
+    return resource_id
+
+def describe_source(source):
+    resource_id = getattr(source, "resource_id", None)
+    color = None
+    if hasattr(source, "get_color"):
+        value = source.get_color()
+        color = {"value": list(value.value_raw), "color_space": str(value.color_space)}
+    return {
+        "type": type(source).__name__,
+        "resource_url": resource_id.url() if resource_id else None,
+        "color": color,
+        "uid": source.uid() if hasattr(source, "uid") and callable(source.uid) else None,
+    }
+
+def describe_sources(node):
+    """Every active channel's source, or None for material-mode Fills and mask Fill effects."""
+    mode = getattr(node, "source_mode", None)
+    if mode is None or mode.name == "Material":
+        return None
+    return {
+        channel.name: describe_source(node.get_source(channel))
+        for channel in sorted(node.active_channels, key=lambda item: item.name)
+    }
+
 def source_value(source):
     kind = type(source).__name__
     if kind == "SourceBitmap":
@@ -2321,10 +2355,14 @@ result = {
         if backup_mode not in {"Incremental", "Full"}:
             raise ValueError("backup_mode must be Incremental or Full")
         code = '''
+import substance_painter.resource as resource
 import substance_painter.textureset as textureset
 
 stack = (textureset.TextureSet.from_name(params["texture_set"]).get_stack()
          if params.get("texture_set") else textureset.get_active_stack())
+for url in params["resources"]:
+    if not resource.Resource.retrieve(resource.ResourceID.from_url(url)):
+        raise ValueError(f"Resource not found: {url}")
 aliases = {"Roughness": "SpecularRoughness", "Metallic": "BaseMetalness", "Emission": "Emissive"}
 channels = sorted({
     name
@@ -2355,9 +2393,15 @@ result = {
                 visit(item.get("children") or [])
 
         visit(normalized)
+        resources = sorted({
+            value
+            for item in flat
+            for value in [*item["channels"].values(), (item.get("mask") or {}).get("fill")]
+            if isinstance(value, str)
+        })
         runtime = _unwrap(
             self.remote.execute_python_json(
-                code, {"texture_set": texture_set, "flat": flat}
+                code, {"texture_set": texture_set, "flat": flat, "resources": resources}
             )
         )
         counts = Counter(str(item["type"]).casefold() for item in flat)
@@ -2369,6 +2413,7 @@ result = {
             "node_count": len(flat),
             "node_types": dict(sorted(counts.items())),
             "resolved_channels": runtime["resolved_channels"],
+            "resources": resources,
             "backup": {
                 "requested": backup_path is not None,
                 "path": str(Path(backup_path).expanduser().resolve()) if backup_path else None,
@@ -2399,8 +2444,7 @@ result = {
             backup = self.save_project_copy(
                 backup_path, mode=backup_mode, overwrite=overwrite_backup
             )
-        code = '''
-import substance_painter.colormanagement as colormanagement
+        code = ACTIVE_CHANNEL_HELPERS + '''
 import substance_painter.layerstack as layerstack
 import substance_painter.textureset as textureset
 
@@ -2445,9 +2489,10 @@ def create_items(items, parent=None):
                 values["BaseColor"] = spec["base_color"]
             if values:
                 node.active_channels = set(node.active_channels) | {resolve_channel(name) for name in values}
-                for name, color in values.items():
-                    node.set_source(resolve_channel(name), colormanagement.Color(*color))
+                for name, value in values.items():
+                    node.set_source(resolve_channel(name), channel_value(value))
         mask = spec.get("mask")
+        mask_fill = None
         if mask:
             background_name = mask.get("background", "Black")
             if background_name not in layerstack.MaskBackground.__members__:
@@ -2455,11 +2500,17 @@ def create_items(items, parent=None):
             node.add_mask(layerstack.MaskBackground.__members__[background_name])
             if mask.get("enabled") is False:
                 node.enable_mask(False)
+            if mask.get("fill"):
+                mask_fill = layerstack.insert_fill(
+                    layerstack.InsertPosition.inside_node(node, layerstack.NodeStack.Mask)
+                )
+                mask_fill.set_source(None, channel_value(mask["fill"]))
         children = create_items(spec.get("children") or [], node) if kind == "group" else []
         described.append({
             "uid": node.uid(),
             "name": node.get_name(),
             "type": type(node).__name__,
+            "mask_fill_uid": mask_fill.uid() if mask_fill else None,
             "children": children,
         })
     described.reverse()
@@ -2506,7 +2557,7 @@ result = {"created_count": len(created_nodes), "nodes": nodes, "rolled_back": Fa
         allowed = {"fill", "paint", "generator", "filter", "levels", "anchor", "smart_mask"}
         if normalized not in allowed:
             raise ValueError(f"effect_type must be one of: {', '.join(sorted(allowed))}")
-        if normalized in {"generator", "filter", "smart_mask"} and resource_url is not None:
+        if normalized in {"fill", "generator", "filter", "smart_mask"} and resource_url is not None:
             if not resource_url.startswith("resource://"):
                 raise ValueError("resource_url must start with resource://")
         if normalized == "smart_mask" and not resource_url:
@@ -2529,6 +2580,8 @@ try:
     kind = params["effect_type"]
     if kind == "fill":
         inserted = [layerstack.insert_fill(position)]
+        if resource_id is not None:
+            inserted[0].set_source(None, resource_id)
     elif kind == "paint":
         inserted = [layerstack.insert_paint(position)]
     elif kind == "generator":
@@ -2925,44 +2978,19 @@ result = {
         )
 
     def get_fill_sources(self, uid: int) -> dict[str, Any]:
-        code = '''
+        code = ACTIVE_CHANNEL_HELPERS + '''
 import substance_painter.layerstack as layerstack
 
 node = layerstack.get_node_by_uid(params["uid"])
 if not isinstance(node, layerstack.FillLayerNode):
     raise TypeError(f"Node {params['uid']} is not a FillLayerNode")
-
-def describe(source):
-    resource_id = getattr(source, "resource_id", None)
-    color = None
-    if hasattr(source, "get_color"):
-        value = source.get_color()
-        color = {
-            "value": list(value.value_raw),
-            "color_space": str(value.color_space),
-        }
-    return {
-        "type": type(source).__name__,
-        "resource_url": resource_id.url() if resource_id else None,
-        "color": color,
-        "uid": source.uid() if hasattr(source, "uid") and callable(source.uid) else None,
-    }
-
-if node.source_mode.name == "Material":
-    material = describe(node.get_material_source())
-    channels = {}
-else:
-    material = None
-    channels = {
-        channel.name: describe(node.get_source(channel))
-        for channel in sorted(node.active_channels, key=lambda item: item.name)
-    }
+material_mode = node.source_mode.name == "Material"
 result = {
     "uid": node.uid(),
     "name": node.get_name(),
     "source_mode": node.source_mode.name,
-    "material": material,
-    "channels": channels,
+    "material": describe_source(node.get_material_source()) if material_mode else None,
+    "channels": {} if material_mode else describe_sources(node),
 }
 '''
         return _unwrap(self.remote.execute_python_json(code, {"uid": uid}))
@@ -3262,6 +3290,7 @@ result = {
     "channel": resolved_channel,
     "source_type": type(source).__name__,
     "resource_url": verified_id.url() if verified_id else params["resource_url"],
+    "sources": describe_sources(node),
 }
 '''
         return _unwrap(
@@ -3668,17 +3697,14 @@ result = {
     def set_fill_channels(
         self,
         uid: int,
-        values: dict[str, float | list[float]],
+        values: dict[str, float | list[float] | str],
     ) -> dict[str, Any]:
         if not values:
             raise ValueError("values must contain at least one channel")
-        normalized: dict[str, list[float]] = {}
-        for channel, value in values.items():
-            color = [float(value)] * 3 if isinstance(value, (int, float)) else list(value)
-            self._validate_color(color)
-            normalized[channel] = color
+        normalized = {
+            channel: self._normalize_channel_value(value) for channel, value in values.items()
+        }
         code = ACTIVE_CHANNEL_HELPERS + '''
-import substance_painter.colormanagement as colormanagement
 import substance_painter.layerstack as layerstack
 import substance_painter.textureset as textureset
 
@@ -3686,24 +3712,44 @@ node = layerstack.get_node_by_uid(params["uid"])
 if not isinstance(node, layerstack.FillLayerNode):
     raise TypeError(f"Node {params['uid']} is not a FillLayerNode")
 resolved = {}
-for name, color in params["values"].items():
+for name, value in params["values"].items():
     if name not in textureset.ChannelType.__members__:
         raise ValueError(f"Unknown channel: {name}")
-    resolved[textureset.ChannelType.__members__[name]] = color
-apply_active_channels(node, set(node.active_channels) | set(resolved))
+    resolved[textureset.ChannelType.__members__[name]] = (value, channel_value(value))
+original_channels = set(node.active_channels)
+originals = {}
+for channel in original_channels & set(resolved):
+    try:
+        originals[channel] = source_value(node.get_source(channel))
+    except ValueError:
+        pass
 verified = {}
-for channel, color in resolved.items():
-    source = node.set_source(channel, colormanagement.Color(*color))
-    verified[channel.name] = {
-        "requested": color,
-        "stored": list(source.get_color().value_raw),
-        "color_space": str(source.get_color().color_space),
-    }
+try:
+    apply_active_channels(node, original_channels | set(resolved))
+    for channel, (value, painter_value) in resolved.items():
+        source = node.set_source(channel, painter_value)
+        if isinstance(value, str):
+            verified[channel.name] = {"requested": value, "resource_url": source.resource_id.url()}
+        else:
+            verified[channel.name] = {
+                "requested": value,
+                "stored": list(source.get_color().value_raw),
+                "color_space": str(source.get_color().color_space),
+            }
+except Exception:
+    try:
+        for channel, value in originals.items():
+            node.set_source(channel, value)
+        apply_active_channels(node, original_channels)
+    except Exception:
+        pass
+    raise
 result = {
     "uid": node.uid(),
     "name": node.get_name(),
     "active_channels": sorted(channel.name for channel in node.active_channels),
     "values": verified,
+    "sources": describe_sources(node),
 }
 '''
         return _unwrap(
@@ -3983,9 +4029,9 @@ result = {
 
     def import_project_resource(
         self,
-        file_path: str,
+        file_path: str | list[str],
         usage: str,
-        name: str | None = None,
+        name: str | list[str | None] | None = None,
         group: str | None = None,
         confirm: bool = False,
     ) -> dict[str, Any]:
@@ -4181,9 +4227,9 @@ else:
 
     def import_session_resource(
         self,
-        file_path: str,
+        file_path: str | list[str],
         usage: str,
-        name: str | None = None,
+        name: str | list[str | None] | None = None,
         group: str | None = None,
         confirm: bool = False,
     ) -> dict[str, Any]:
@@ -4191,9 +4237,9 @@ else:
 
     def _import_resource(
         self,
-        file_path: str,
+        file_path: str | list[str],
         usage: str,
-        name: str | None,
+        name: str | list[str | None] | None,
         group: str | None,
         scope: str,
         confirm: bool,
@@ -4204,10 +4250,20 @@ else:
         if normalized_usage not in SAFE_RESOURCE_IMPORT_USAGES:
             allowed = ", ".join(sorted(SAFE_RESOURCE_IMPORT_USAGES))
             raise ValueError(f"usage must be one of the safe import usages: {allowed}")
-        for label, value in (("name", name), ("group", group)):
+        single = isinstance(file_path, str)
+        paths = [file_path] if single else list(file_path)
+        names = list(name) if isinstance(name, list) else [name] * len(paths)
+        if not paths:
+            raise ValueError("file_path must list at least one file")
+        if len(names) != len(paths) or (len(paths) > 1 and isinstance(name, str)):
+            raise ValueError("name must be a list with one entry per file when importing several")
+        for label, value in (("group", group), *(("name", item) for item in names)):
             if value is not None and (not isinstance(value, str) or not value.strip()):
                 raise ValueError(f"{label} must be a non-empty string when supplied")
-        input_path = self._validate_resource_import_path(file_path)
+        files = [
+            {"file_path": self._validate_resource_import_path(path).as_posix(), "name": item}
+            for path, item in zip(paths, names)
+        ]
         code = '''
 import substance_painter.project as project
 import substance_painter.resource as resource
@@ -4218,45 +4274,46 @@ if params["scope"] == "project":
     if project.is_busy():
         raise RuntimeError("Painter is busy and cannot import a project resource")
 usage = resource.Usage.__members__[params["usage"]]
-if params["scope"] == "project":
-    item = resource.import_project_resource(
-        params["file_path"], usage, params.get("name"), params.get("group")
-    )
-else:
-    item = resource.import_session_resource(
-        params["file_path"], usage, params.get("name"), params.get("group")
-    )
-identifier = item.identifier()
-retrieved = resource.Resource.retrieve(identifier)
-result = {
-    "scope": params["scope"],
-    "source_path": params["file_path"],
-    "url": identifier.url(),
-    "name": identifier.name,
-    "context": identifier.context,
-    "version": identifier.version,
-    "location": item.location().name,
-    "type": item.type().name,
-    "category": item.category(),
-    "usages": [value.name for value in item.usages()],
-    "verified": any(candidate.identifier() == identifier for candidate in retrieved),
-}
+importer = (resource.import_project_resource if params["scope"] == "project"
+            else resource.import_session_resource)
+imported, failed = [], []
+# Each file is imported and verified on its own, so one bad file does not hide the others.
+for spec in params["files"]:
+    try:
+        item = importer(spec["file_path"], usage, spec["name"], params.get("group"))
+        identifier = item.identifier()
+        retrieved = resource.Resource.retrieve(identifier)
+        if not any(candidate.identifier() == identifier for candidate in retrieved):
+            raise IOError("Painter resource import could not be verified")
+    except Exception as exc:
+        failed.append({"source_path": spec["file_path"], "error": f"{type(exc).__name__}: {exc}"})
+        continue
+    imported.append({
+        "scope": params["scope"],
+        "source_path": spec["file_path"],
+        "url": identifier.url(),
+        "name": identifier.name,
+        "context": identifier.context,
+        "version": identifier.version,
+        "location": item.location().name,
+        "type": item.type().name,
+        "category": item.category(),
+        "usages": [value.name for value in item.usages()],
+        "verified": True,
+    })
+result = {"imported": imported, "failed": failed}
 '''
         result = _unwrap(
             self.remote.execute_python_json(
                 code,
-                {
-                    "scope": scope,
-                    "file_path": input_path.as_posix(),
-                    "usage": normalized_usage,
-                    "name": name,
-                    "group": group,
-                },
+                {"scope": scope, "files": files, "usage": normalized_usage, "group": group},
             )
         )
-        if not result.get("verified"):
-            raise IOError(f"Painter resource import could not be verified: {input_path}")
-        return result
+        if not single:
+            return {"scope": scope, "count": len(result["imported"]), **result}
+        if result["failed"]:
+            raise IOError(f"Painter resource import failed: {result['failed'][0]['error']}")
+        return result["imported"][0]
 
     def list_project_resources(self) -> dict[str, Any]:
         code = '''
@@ -4705,15 +4762,25 @@ result = {"original_project": original, "current_project": current}
         if mode == "Triplanar" and "offset" in transform:
             raise ValueError("Triplanar projection does not support transform.offset")
 
-    def delete_layer(self, uid: int) -> dict[str, Any]:
+    def delete_layer(self, uid: int | list[int]) -> dict[str, Any]:
+        uids = list(dict.fromkeys([uid] if isinstance(uid, int) else uid))
+        if not uids:
+            raise ValueError("uid must list at least one layer")
         code = '''
 import substance_painter.layerstack as layerstack
-node = layerstack.get_node_by_uid(params["uid"])
-deleted = {"uid": node.uid(), "name": node.get_name(), "type": type(node).__name__}
-layerstack.delete_node(node)
+# Resolve every UID before deleting anything, so one bad UID deletes nothing.
+nodes = [layerstack.get_node_by_uid(uid) for uid in params["uids"]]
+deleted = [{"uid": node.uid(), "name": node.get_name(), "type": type(node).__name__} for node in nodes]
+for item in deleted:
+    try:
+        node = layerstack.get_node_by_uid(item["uid"])
+    except ValueError:
+        continue  # already removed with a group deleted earlier in this call
+    layerstack.delete_node(node)
 result = deleted
 '''
-        return _unwrap(self.remote.execute_python_json(code, {"uid": uid}))
+        deleted = _unwrap(self.remote.execute_python_json(code, {"uids": uids}))
+        return deleted[0] if isinstance(uid, int) else {"count": len(deleted), "deleted": deleted}
 
     def _export_smart_asset(
         self,
@@ -4815,8 +4882,7 @@ result = {"uid": node.uid(), "layer": node.get_name(), "kind": params["kind"]}
                 if channels and kind != "fill":
                     raise ValueError("channels are only valid for fill recipe items")
                 for value in channels.values():
-                    color = [float(value)] * 3 if isinstance(value, (int, float)) else list(value)
-                    cls._validate_color(color)
+                    cls._normalize_channel_value(value)
                 active = item.get("active_channels") or []
                 if not isinstance(active, list) or any(not isinstance(value, str) for value in active):
                     raise ValueError("active_channels must be a list of strings")
@@ -4831,6 +4897,9 @@ result = {"uid": node.uid(), "layer": node.get_name(), "kind": params["kind"]}
                         raise ValueError("mask background must be Black or White")
                     if "enabled" in mask and not isinstance(mask["enabled"], bool):
                         raise ValueError("mask enabled must be a boolean")
+                    fill = mask.get("fill")
+                    if fill is not None and (not isinstance(fill, str) or not fill.startswith("resource://")):
+                        raise ValueError("mask fill must be a resource:// URL")
                 visit(children, depth + 1)
 
         visit(recipe)
@@ -4843,8 +4912,7 @@ result = {"uid": node.uid(), "layer": node.get_name(), "kind": params["kind"]}
             for item in items:
                 channels = item.get("channels") or {}
                 item["channels"] = {
-                    name: ([float(value)] * 3 if isinstance(value, (int, float)) else list(value))
-                    for name, value in channels.items()
+                    name: cls._normalize_channel_value(value) for name, value in channels.items()
                 }
                 visit(item.get("children") or [])
 
@@ -5125,6 +5193,17 @@ result = {"uid": node.uid(), "layer": node.get_name(), "kind": params["kind"]}
             raise ValueError("color must contain exactly three numbers")
         if any(value < 0 or value > 1 for value in color):
             raise ValueError("color components must be in the 0..1 range")
+
+    @classmethod
+    def _normalize_channel_value(cls, value: Any) -> str | list[float]:
+        """A resource:// URL for a bitmap, or a scalar or RGB value as a checked [r, g, b]."""
+        if isinstance(value, str):
+            if not value.startswith("resource://"):
+                raise ValueError(f"Channel resources must be resource:// URLs: {value}")
+            return value
+        color = [float(value)] * 3 if isinstance(value, (int, float)) else list(value)
+        cls._validate_color(color)
+        return color
 
     @staticmethod
     def _validate_parameter_values(values: dict[str, Any]) -> None:

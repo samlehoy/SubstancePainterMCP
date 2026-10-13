@@ -20,11 +20,11 @@ Every node accepts:
 | `type` | string | Required: `group`, `fill`, or `paint`. |
 | `name` | string | Required non-empty layer name. |
 | `visible` | boolean | Optional initial visibility. |
-| `mask` | object | Optional `Black` or `White` mask and enabled state. |
+| `mask` | object | Optional `Black` or `White` mask, enabled state, and `fill` bitmap. |
 
 Group nodes may contain a recursive `children` list. Fill nodes may contain `base_color`, `channels`, and `active_channels`. Paint nodes may contain `active_channels`.
 
-Scalar channel values are expanded to RGB uniform values. `Roughness`, `Metallic`, and `Emission` are resolved to the matching legacy or OpenPBR runtime channel.
+A `channels` value is a number, an `[r, g, b]` list, or a `resource://` URL. Scalar values are expanded to RGB uniform values, and a URL assigns that bitmap, so imported texture maps need no separate `set_fill_resource` calls. `mask.fill` takes a `resource://` URL and adds a Fill effect with that bitmap to the mask; its UID is returned as `mask_fill_uid`. `plan_layer_recipe` checks that every referenced resource exists before anything is created. `Roughness`, `Metallic`, and `Emission` are resolved to the matching legacy or OpenPBR runtime channel.
 
 ## Example
 
@@ -43,6 +43,19 @@ The repository includes [a VRChat outfit starter recipe](../examples/recipes/vrc
         "channels": {"Roughness": 0.5, "Metallic": 0.0}
       }
     ]
+  }
+]
+```
+
+A decal layer with a bitmap color and a bitmap-driven mask, using URLs returned by `import_project_resource`:
+
+```json
+[
+  {
+    "type": "fill",
+    "name": "Chest Decal",
+    "channels": {"BaseColor": "resource://project0/decal_color", "Roughness": 0.6},
+    "mask": {"background": "Black", "fill": "resource://project0/decal_mask"}
   }
 ]
 ```

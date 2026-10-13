@@ -41,17 +41,17 @@ All 79 MCP tools, grouped by purpose. Tools that change the project or write fil
 | `create_fill_layer` | Create a Fill layer with an optional base color. |
 | `create_paint_layer` | Create a Paint layer. |
 | `create_group` | Create a layer group. |
-| `plan_layer_recipe` | Validate a recipe, resolve channels, and preview backup/mutation scope. |
+| `plan_layer_recipe` | Validate a recipe, resolve channels and resources, and preview backup/mutation scope. |
 | `create_layer_recipe` | Create nested structures atomically, optionally after an `.spp` backup. |
 | `set_geometry_mask` | Apply inclusion/exclusion masks using mesh names or UDIM numbers. |
 | `insert_smart_material` | Apply a Smart Material at stack top or inside a group. |
 | `apply_smart_mask` | Apply a Smart Mask with transactional cleanup on failure. |
 | `set_fill_base_color` | Convert an sRGB input color into Painter's working color space. |
-| `set_fill_channels` | Set multiple uniform channels, including Roughness, Metallic, and Emission aliases. |
+| `set_fill_channels` | Set several channels in one call, as uniform values or `resource://` bitmaps, and report every channel's source. |
 | `get_fill_projection` | Inspect Fill projection mode and common UV transforms. |
 | `set_fill_projection` | Set Fill, UV, or Triplanar projection and transforms transactionally. |
 | `get_fill_sources` | Inspect material-mode or per-channel Fill sources. |
-| `set_fill_resource` | Assign a `resource://` asset to one channel, a complete Fill material, or a mask Fill effect. |
+| `set_fill_resource` | Assign a `resource://` asset to one channel, a complete Fill material, or a mask Fill effect, and report every channel's source. |
 | `set_fill_parameters` | Transactionally update typed procedural Substance parameters. |
 | `set_procedural_input` | Connect a verified resource to a procedural image input or reset its default. |
 | `apply_fill_preset` | Apply a named preset exposed by the current procedural source. |
@@ -59,11 +59,11 @@ All 79 MCP tools, grouped by purpose. Tools that change the project or write fil
 | `set_fill_projection_advanced` | Configure UV, Triplanar, Planar, Spherical, or Cylindrical projection details. |
 | `set_active_channels` | Replace a Fill or Paint layer's active channel set. |
 | `set_layer_mask` | Add, replace, or remove a White/Black mask. |
-| `insert_mask_effect` | Insert procedural or paint effects into a layer's mask stack. |
+| `insert_mask_effect` | Insert procedural or paint effects into a layer's mask stack; a Fill can take a bitmap directly. |
 | `set_layer_properties` | Set visibility and channel-specific opacity or blend mode. |
 | `rename_layer` | Rename a layer by UID. |
 | `select_layers` | Select one or more layers by UID. |
-| `delete_layer` | Delete a layer by UID. |
+| `delete_layer` | Delete one or several layers by UID; every UID is checked first. |
 
 Layer names are not unique in Painter. All mutation tools therefore use the UIDs returned by `list_layers` or `find_layers`.
 
@@ -82,8 +82,8 @@ Layer names are not unique in Painter. All mutation tools therefore use the UIDs
 | `export_smart_material` | Export a Group as a verified `.spsm` file. |
 | `export_smart_mask` | Export a layer mask as a verified `.spmsk` file. |
 | `replace_outdated_resources` | Apply Painter's atomic resource replacement after `confirm=true`. |
-| `import_project_resource` | Import and verify a safe visual resource inside the open project after `confirm=true`. |
-| `import_session_resource` | Import and verify a safe visual resource for the current Painter session after `confirm=true`. |
+| `import_project_resource` | Import and verify one or several safe visual resources inside the open project after `confirm=true`. |
+| `import_session_resource` | Import and verify one or several safe visual resources for the current Painter session after `confirm=true`. |
 | `import_shelf_resource` | Persist and verify a safe visual resource in a writable Painter shelf after `confirm=true`. |
 | `start_shelf_refresh` | Refresh one configured shelf and bridge Painter crawling events into a persistent job. |
 | `start_bake` | Start an asynchronous bake after `confirm=true`, optionally creating a project copy first. |

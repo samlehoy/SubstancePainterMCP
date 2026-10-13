@@ -60,6 +60,29 @@ def test_fill_channels_normalizes_scalar_values():
     assert remote.calls[0][1] == {"uid": 3, "values": {"Roughness": [0.4, 0.4, 0.4]}}
 
 
+def test_fill_channels_take_bitmaps_and_values_together():
+    remote = FakeRemote()
+    operations = PainterOperations(remote)
+    with pytest.raises(ValueError, match="resource://"):
+        operations.set_fill_channels(3, {"BaseColor": "/tmp/color.png"})
+    assert remote.calls == []
+    operations.set_fill_channels(3, {"BaseColor": "resource://project0/Color", "Roughness": 0.4})
+    assert remote.calls[0][1]["values"] == {
+        "BaseColor": "resource://project0/Color",
+        "Roughness": [0.4, 0.4, 0.4],
+    }
+
+
+def test_delete_layer_takes_several_uids_in_one_call():
+    remote = FakeRemote({"success": True, "data": [{"uid": 5}, {"uid": 9}]})
+    operations = PainterOperations(remote)
+    with pytest.raises(ValueError, match="at least one"):
+        operations.delete_layer([])
+    assert operations.delete_layer([5, 9, 5]) == {"count": 2, "deleted": [{"uid": 5}, {"uid": 9}]}
+    assert remote.calls[0][1] == {"uids": [5, 9]}
+    assert operations.delete_layer(5) == {"uid": 5}
+
+
 def test_resource_search_validates_query_and_limit():
     operations = PainterOperations(FakeRemote())
     with pytest.raises(ValueError, match="empty"):
@@ -107,19 +130,44 @@ def test_project_and_session_resource_import_transport(tmp_path, monkeypatch):
     source = tmp_path / "texture.png"
     source.write_bytes(b"png")
     monkeypatch.setenv("SP_MCP_RESOURCE_ROOTS", str(tmp_path))
-    response = {"success": True, "data": {"verified": True, "url": "resource://test/item"}}
+    imported = {"verified": True, "url": "resource://test/item"}
+    response = {"success": True, "data": {"imported": [imported], "failed": []}}
     for scope in ("project", "session"):
         remote = FakeRemote(response)
         operations = PainterOperations(remote)
         method = getattr(operations, f"import_{scope}_resource")
-        assert method(str(source), "texture", "Imported", "MCP", True)["verified"]
+        assert method(str(source), "texture", "Imported", "MCP", True) == imported
         assert remote.calls[0][1] == {
             "scope": scope,
-            "file_path": source.resolve().as_posix(),
+            "files": [{"file_path": source.resolve().as_posix(), "name": "Imported"}],
             "usage": "TEXTURE",
-            "name": "Imported",
             "group": "MCP",
         }
+
+
+def test_resource_import_takes_several_files_in_one_call(tmp_path, monkeypatch):
+    sources = [tmp_path / "color.png", tmp_path / "decal.png"]
+    for source in sources:
+        source.write_bytes(b"png")
+    monkeypatch.setenv("SP_MCP_RESOURCE_ROOTS", str(tmp_path))
+    failed = [{"source_path": "decal.png", "error": "ValueError: bad image"}]
+    remote = FakeRemote({"success": True, "data": {"imported": [{"url": "resource://p/color"}], "failed": failed}})
+    operations = PainterOperations(remote)
+    paths = [str(source) for source in sources]
+    with pytest.raises(ValueError, match="one entry per file"):
+        operations.import_project_resource(paths, "TEXTURE", "Decal", confirm=True)
+    with pytest.raises(ValueError, match="one entry per file"):
+        operations.import_project_resource(paths, "TEXTURE", ["Decal"], confirm=True)
+    assert remote.calls == []
+    result = operations.import_project_resource(paths, "TEXTURE", [None, "Decal"], confirm=True)
+    assert result == {"scope": "project", "count": 1, "imported": [{"url": "resource://p/color"}], "failed": failed}
+    assert remote.calls[0][1]["files"] == [
+        {"file_path": sources[0].resolve().as_posix(), "name": None},
+        {"file_path": sources[1].resolve().as_posix(), "name": "Decal"},
+    ]
+    remote.response = {"success": True, "data": {"imported": [], "failed": failed}}
+    with pytest.raises(IOError, match="bad image"):
+        operations.import_project_resource(paths[1], "TEXTURE", confirm=True)
 
 
 def test_shelf_resource_import_requires_confirmation(tmp_path, monkeypatch):
@@ -231,6 +279,30 @@ def test_layer_recipe_normalizes_scalar_channels():
     }
 
 
+def test_layer_recipe_checks_bitmap_channels_and_mask_fills():
+    remote = FakeRemote({"success": True, "data": {
+        "texture_set": "Body", "stack": "Body", "resolved_channels": {}, "layers": [],
+    }})
+    operations = PainterOperations(remote)
+    decal = {
+        "type": "fill",
+        "name": "Decal",
+        "channels": {"BaseColor": "resource://project0/Decal", "Roughness": 0.5},
+        "mask": {"background": "Black", "fill": "resource://project0/DecalMask"},
+    }
+    plan = operations.plan_layer_recipe([decal])
+    assert plan["resources"] == ["resource://project0/Decal", "resource://project0/DecalMask"]
+    assert remote.calls[0][1]["resources"] == plan["resources"]
+    assert plan["recipe"][0]["channels"] == {
+        "BaseColor": "resource://project0/Decal",
+        "Roughness": [0.5, 0.5, 0.5],
+    }
+    for bad in ({**decal, "channels": {"BaseColor": "decal.png"}},
+                {**decal, "mask": {"fill": "decal.png"}}):
+        with pytest.raises(ValueError, match="resource://"):
+            operations.plan_layer_recipe([bad])
+
+
 def test_geometry_mask_validates_element_types_locally():
     operations = PainterOperations(FakeRemote())
     with pytest.raises(ValueError, match="mesh-name"):
@@ -288,6 +360,16 @@ def test_fill_resource_validates_url_and_material_mode():
     assert remote.calls[-1][1]["channel"] is None
 
 
+def test_mask_fill_effect_takes_a_bitmap():
+    remote = FakeRemote()
+    operations = PainterOperations(remote)
+    with pytest.raises(ValueError, match="resource://"):
+        operations.insert_mask_effect(1, "fill", "/tmp/mask.png")
+    operations.insert_mask_effect(1, "Fill", "resource://project0/mask")
+    assert remote.calls[0][1]["effect_type"] == "fill"
+    assert remote.calls[0][1]["resource_url"] == "resource://project0/mask"
+
+
 class Channel:
     def __init__(self, name):
         self.name = name
@@ -302,6 +384,8 @@ class ResourceID:
 
 
 class Color:
+    color_space = "sRGB"
+
     def __init__(self, *value):
         self.value_raw = value
 
@@ -387,6 +471,22 @@ def test_adding_a_channel_restores_other_sources():
     assert node.get_source(base).resource_id.url() == "resource://project/color"
     assert node.get_source(roughness).get_color().value_raw == (0.3, 0.3, 0.3)
     assert normal in node.active_channels
+
+
+def test_fill_sources_are_described_for_every_active_channel():
+    from substance_painter_mcp.operations import ACTIVE_CHANNEL_HELPERS
+
+    namespace = {}
+    exec(ACTIVE_CHANNEL_HELPERS, namespace)
+    base, roughness = Channel("BaseColor"), Channel("SpecularRoughness")
+    node = PainterLikeFill({
+        roughness: SourceUniformColor(Color(0.3, 0.3, 0.3)),
+        base: SourceBitmap(ResourceID("resource://project/color")),
+    })
+    sources = namespace["describe_sources"](node)
+    assert list(sources) == ["BaseColor", "SpecularRoughness"]
+    assert sources["BaseColor"]["resource_url"] == "resource://project/color"
+    assert sources["SpecularRoughness"]["color"] == {"value": [0.3, 0.3, 0.3], "color_space": "sRGB"}
 
 
 def test_unrestorable_source_blocks_channel_change_before_mutation():
@@ -852,14 +952,14 @@ def test_recipe_rolls_back_root_when_post_verification_fails():
                         "nodes": [{"uid": 99, "name": "Temporary", "type": "GroupLayerNode"}],
                     },
                 }
-            return {"success": True, "data": {"uid": 99}}
+            return {"success": True, "data": [{"uid": 99}]}
 
     remote = FailingVerificationRemote()
     with pytest.raises(RuntimeError, match="snapshot failed"):
         PainterOperations(remote).create_layer_recipe(
             [{"type": "group", "name": "Temporary"}]
         )
-    assert any("delete_node" in code and params == {"uid": 99} for code, params in remote.calls)
+    assert any("delete_node" in code and params == {"uids": [99]} for code, params in remote.calls)
 
 
 def test_recipe_backup_requires_configured_project_root(monkeypatch, tmp_path):

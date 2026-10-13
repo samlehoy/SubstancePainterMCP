@@ -36,6 +36,19 @@ Use `import_session_resource` for temporary resources that should disappear when
 
 Both tools return a versioned `resource://` URL, Painter context/location/type, category, usages, and `verified`. The server re-retrieves the exact returned ResourceID before reporting success.
 
+To import several files in one call, pass a list of paths. `name` is then optional, and if given, it is a list with one entry per file (`null` keeps the file name):
+
+```json
+{
+  "file_path": ["D:\\SubstanceResources\\color.png", "D:\\SubstanceResources\\decal_7f3a.png"],
+  "usage": "TEXTURE",
+  "name": [null, "Chest Decal"],
+  "confirm": true
+}
+```
+
+Every path is checked before Painter imports anything. Each file is then imported and verified on its own, and the result lists `imported` resources and `failed` files with their errors, so one bad file does not hide the others.
+
 Project imports are persistent mutations. Painter's public API does not expose a general-purpose safe delete for an arbitrary embedded project resource, so use session scope for disposable experiments.
 
 ## Persistent shelf resources
