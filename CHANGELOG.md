@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.1.0 - 2026-10-13
+
+Version 1.1.0 lets an assistant do in one call what used to take several, and makes the installed server start faster.
+
+- `import_project_resource` and `import_session_resource` accept a list of paths, with an optional list of names. Every path is checked before Painter imports anything; each file is then imported and verified on its own, and the result lists `imported` resources and `failed` files with their errors.
+- `set_fill_channels` accepts `resource://` URLs as well as numbers and RGB values, so several bitmaps and uniform values are set in one call. A failed call restores the previous sources and active channels.
+- `set_fill_channels` and `set_fill_resource` return `sources`, every active channel's current source, so no follow-up `get_fill_sources` call is needed to confirm that other channels were kept.
+- Layer recipes accept `resource://` URLs as channel values, and `mask.fill` adds a Fill effect with a bitmap to a layer's mask (its UID is returned as `mask_fill_uid`). `plan_layer_recipe` checks that every referenced resource exists and lists them under `resources`. The recipe format is now part of the recipe tools' descriptions, so assistants no longer need the docs to write one.
+- `insert_mask_effect` accepts `resource_url` for a Fill effect, so a bitmap-driven mask takes one call. Before, the URL was ignored for Fill effects.
+- `delete_layer` accepts a list of UIDs. Every UID is resolved before anything is deleted, and children of a deleted group are handled.
+- The installer pins the server to the exact commit it was run from instead of the release tag. uvx then starts from its cache without fetching the tag (about 1.3 s faster per start) and works offline.
+- The README's install and uninstall commands no longer name a version, so a command from an old README or terminal history cannot run an outdated installer. The installer still pins each assistant to the exact release it installs.
+- Added 7 tests (94 total). The batch tools passed 20 live checks on Painter 12.1.5; see [DEVELOPMENT.md](docs/DEVELOPMENT.md).
+
 ## 1.0.4 - 2026-10-13
 
 Version 1.0.4 makes the installer interactive and bilingual.

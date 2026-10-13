@@ -20,8 +20,10 @@ winget install astral-sh.uv  # Windows
 **1. Run the installer.**
 
 ```bash
-uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.4 substance-painter-mcp install
+uvx --from git+https://github.com/samlehoy/SubstancePainterMCP substance-painter-mcp install
 ```
+
+This always runs the newest installer, and it pins your assistants to that exact release. Run it again later to upgrade.
 
 It first asks for a language (English or Bahasa Indonesia), then walks you through three steps:
 
@@ -34,7 +36,7 @@ It first asks for a language (English or Bahasa Indonesia), then walks you throu
 
 ```text
 ╭───────────────────────────────────────────╮
-│  Substance Painter MCP · installer 1.0.4  │
+│  Substance Painter MCP · installer 1.1.0  │
 ╰───────────────────────────────────────────╯
 ✔ Painter 12.1.5 found
 
@@ -101,7 +103,7 @@ Every MCP client runs the same command; only the config format differs.
 claude mcp add substance-painter -s user \
   -e SP_MCP_EXPORT_ROOTS="$HOME/SubstanceProjects" \
   -e SP_MCP_PROJECT_ROOTS="$HOME/SubstanceProjects" \
-  -- uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.4 substance-painter-mcp
+  -- uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.1.0 substance-painter-mcp
 ```
 
 **Claude Desktop, Cursor, Antigravity** (`mcpServers` format; Antigravity uses `~/.gemini/config/mcp_config.json`)
@@ -111,7 +113,7 @@ claude mcp add substance-painter -s user \
   "mcpServers": {
     "substance-painter": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.4", "substance-painter-mcp"],
+      "args": ["--from", "git+https://github.com/samlehoy/SubstancePainterMCP@v1.1.0", "substance-painter-mcp"],
       "env": {
         "SP_MCP_EXPORT_ROOTS": "/path/to/SubstanceProjects",
         "SP_MCP_PROJECT_ROOTS": "/path/to/SubstanceProjects"
@@ -129,7 +131,7 @@ claude mcp add substance-painter -s user \
   "mcp": {
     "substance-painter": {
       "type": "local",
-      "command": ["uvx", "--from", "git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.4", "substance-painter-mcp"],
+      "command": ["uvx", "--from", "git+https://github.com/samlehoy/SubstancePainterMCP@v1.1.0", "substance-painter-mcp"],
       "environment": {
         "SP_MCP_EXPORT_ROOTS": "/path/to/SubstanceProjects",
         "SP_MCP_PROJECT_ROOTS": "/path/to/SubstanceProjects"
@@ -147,7 +149,7 @@ If a GUI app cannot find `uvx`, use its absolute path (`which uvx` / `where uvx`
 ## Uninstall
 
 ```bash
-uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@v1.0.4 substance-painter-mcp uninstall
+uvx --from git+https://github.com/samlehoy/SubstancePainterMCP substance-painter-mcp uninstall
 ```
 
 It finds `substance-painter` in Claude Code (user scope), Claude Desktop, Antigravity, and OpenCode, shows what it will remove, and asks for confirmation. Only that entry is removed, config files are backed up first, and your work folder and projects are not touched. To also delete the cached package, run `uv cache clean substance-painter-mcp`. If you added the server to a single Claude Code project instead, run `claude mcp remove substance-painter -s local` in that folder.
@@ -157,7 +159,8 @@ It finds `substance-painter` in Claude Code (user scope), Claude Desktop, Antigr
 79 tools, including:
 
 - **Inspect**: project info, layer tree, Texture Sets, resources, export presets, project audit.
-- **Build layers**: Fill, Paint, and Group layers, channels, masks, Smart Materials and Smart Masks, procedural parameters, and multi-layer recipes that roll back if a step fails.
+- **Build layers**: Fill, Paint, and Group layers, channels, masks, Smart Materials and Smart Masks, procedural parameters, and multi-layer recipes with bitmaps and bitmap masks that roll back if a step fails.
+- **Batch work**: import several images, set several channels (bitmaps or values), or delete several layers in one call.
 - **Bake**: inspect and configure bakers, assign high-poly meshes, preflight, and batch-bake with cancellation.
 - **Export**: preview exact file names, then export textures with presets or engine profiles (Unity, Unreal, Blender, VRChat).
 - **Manage projects**: create from a mesh, open, save, back up, reload meshes, import images as resources.
