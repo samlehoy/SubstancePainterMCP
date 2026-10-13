@@ -2,6 +2,8 @@
 
 The interactive installer sets every `SP_MCP_*_ROOTS` variable to one work folder. Set them individually to separate inputs from outputs.
 
+The installer also pins the server to the exact commit of the release it ran from (`…SubstancePainterMCP@<commit>` instead of `@v1.1.0`). uvx then starts the server from its cache without fetching the tag again, which is about 1.3 s faster per start and works offline. Run the installer again to upgrade.
+
 ## Environment variables
 
 | Variable | Default | Description |

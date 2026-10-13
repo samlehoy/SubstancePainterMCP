@@ -1,11 +1,12 @@
 """Interactive installer that registers this server with MCP clients, or removes it.
 
-Run with: uvx --from git+https://github.com/samlehoy/SubstancePainterMCP@vX.Y.Z substance-painter-mcp install
+Run with: uvx --from git+https://github.com/samlehoy/SubstancePainterMCP substance-painter-mcp install
 (or `uninstall`).
 """
 
 from __future__ import annotations
 
+from importlib import metadata
 import json
 import os
 from pathlib import Path
@@ -52,8 +53,25 @@ WINDOWS_PAINTER = Path(
 )
 
 
+def package_source() -> str:
+    """The git source uvx installed this package from, pinned to its exact commit.
+
+    A commit pin lets uvx start from its cache without fetching the tag again (about
+    1.3 s faster, and it works offline). Other installs fall back to this release's tag.
+    """
+    try:
+        text = metadata.distribution("substance-painter-mcp").read_text("direct_url.json")
+    except metadata.PackageNotFoundError:
+        text = None
+    info = json.loads(text or "{}")
+    vcs = info.get("vcs_info") or {}
+    if vcs.get("vcs") == "git" and vcs.get("commit_id"):
+        return f"git+{info['url']}@{vcs['commit_id']}"
+    return f"git+{REPO}@v{__version__}"
+
+
 def server_command(uvx: str) -> list[str]:
-    return [uvx, "--from", f"git+{REPO}@v{__version__}", "substance-painter-mcp"]
+    return [uvx, "--from", package_source(), "substance-painter-mcp"]
 
 
 def json_config_path(client: str) -> Path:

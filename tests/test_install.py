@@ -31,6 +31,26 @@ def test_merge_keeps_other_servers_and_replaces_own_entry(tmp_path):
     assert json.loads(backup.read_text())["mcpServers"][NAME] == {"command": "old"}
 
 
+def test_server_command_pins_the_installed_commit(monkeypatch):
+    from substance_painter_mcp import install
+
+    class Distribution:
+        def __init__(self, info):
+            self.info = info
+
+        def read_text(self, name):
+            return json.dumps(self.info)
+
+    commit = "a1a42e4891a49f9db81b64ee4efe7e1832ac7678"
+    info = {"url": "https://github.com/me/fork", "vcs_info": {"vcs": "git", "commit_id": commit}}
+    monkeypatch.setattr(install.metadata, "distribution", lambda name: Distribution(info))
+    assert install.server_command("uvx")[2] == f"git+https://github.com/me/fork@{commit}"
+    # Local and editable installs have no commit to pin, so the release tag is used.
+    local = {"url": "file:///src", "dir_info": {"editable": True}}
+    monkeypatch.setattr(install.metadata, "distribution", lambda name: Distribution(local))
+    assert install.server_command("uvx")[2] == f"git+{install.REPO}@v{install.__version__}"
+
+
 def test_opencode_entry_uses_local_command_array(tmp_path):
     path = tmp_path / "opencode" / "opencode.json"
     assert write_json_config(path, "opencode", COMMAND, ENV) is None
