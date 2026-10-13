@@ -148,14 +148,23 @@ def interactive_console(keys):
 
 def test_interactive_client_picker_uses_arrow_keys_and_space():
     options = [
-        ("claude-code", "Claude Code", None, False, None),
-        ("claude-desktop", "Claude Desktop", "note.not_detected", False, None),
-        ("antigravity", "Antigravity", "note.installed", True, None),
-        ("opencode", "OpenCode", None, False, None),
+        ("claude-code", "Claude Code", None, None),
+        ("claude-desktop", "Claude Desktop", "note.not_detected", None),
+        ("antigravity", "Antigravity", "note.installed", None),
+        ("opencode", "OpenCode", None, None),
     ]
-    # Select Claude Code, move down to OpenCode and select it; Antigravity starts checked.
+    # Select Claude Code, move down to OpenCode and select it. An installed assistant is only
+    # labeled, not pre-checked, so Space never unchecks something the user meant to select.
     with interactive_console(" " + DOWN * 3 + " " + ENTER) as console:
-        assert console.choose_clients(options) == ["claude-code", "antigravity", "opencode"]
+        assert console.choose_clients(options) == ["claude-code", "opencode"]
+
+
+def test_checked_items_are_not_drawn_reversed():
+    from prompt_toolkit.styles import default_ui_style, merge_styles
+
+    style = merge_styles([default_ui_style(), Console(fancy=True).style])
+    attrs = style.get_attrs_for_style_str("class:selected")
+    assert attrs.color == "ansigreen" and not attrs.reverse
 
 
 def test_interactive_folder_accepts_dragged_path_and_empty_default(tmp_path):

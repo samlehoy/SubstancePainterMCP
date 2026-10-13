@@ -258,8 +258,8 @@ def is_broad(folder: Path) -> bool:
     return folder == home or folder in home.parents or folder == Path(folder.anchor)
 
 
-def client_options() -> list[tuple[str, str, str | None, bool, str | None]]:
-    """(client, label, note key, installed, disabled-reason key) for every supported client."""
+def client_options() -> list[tuple[str, str, str | None, str | None]]:
+    """(client, label, note key, disabled-reason key) for every supported client."""
     options = []
     for client, label in CLIENTS.items():
         disabled = None
@@ -279,7 +279,7 @@ def client_options() -> list[tuple[str, str, str | None, bool, str | None]]:
                 or (client == "opencode" and shutil.which("opencode") is not None)
             )
         note = "note.installed" if installed else None if detected else "note.not_detected"
-        options.append((client, label, note, installed, disabled))
+        options.append((client, label, note, disabled))
     return options
 
 
@@ -306,7 +306,9 @@ class Console:
                 ("answer", "fg:ansigreen bold"),
                 ("pointer", "fg:ansigreen bold"),
                 ("highlighted", "fg:ansigreen bold"),
-                ("selected", "fg:ansigreen"),
+                # prompt_toolkit's default style reverses "selected" (text selection), which
+                # questionary reuses for checked items; without noreverse they render as blocks.
+                ("selected", "fg:ansigreen noreverse"),
                 ("instruction", "fg:ansibrightblack"),
                 ("disabled", "fg:ansibrightblack italic"),
                 ("accent", "fg:ansigreen bold"),
@@ -378,9 +380,7 @@ class Console:
         answer = input(f"{question} ({'Y/n' if default else 'y/N'}): ").strip().lower()
         return answer.startswith("y") if answer else default
 
-    def choose_clients(
-        self, options: list[tuple[str, str, str | None, bool, str | None]]
-    ) -> list[str]:
+    def choose_clients(self, options: list[tuple[str, str, str | None, str | None]]) -> list[str]:
         if self.fancy:
             import questionary
 
@@ -389,10 +389,9 @@ class Console:
                     title=[("class:text", label)]
                     + ([("class:dim", f"  {self.t(note)}")] if note else []),
                     value=client,
-                    checked=installed and not disabled,
                     disabled=self.t(disabled) if disabled else None,
                 )
-                for client, label, note, installed, disabled in options
+                for client, label, note, disabled in options
             ]
             return questionary.checkbox(
                 self.t("clients.question"),
@@ -402,11 +401,11 @@ class Console:
                 style=self.style,
                 **self.io,
             ).unsafe_ask()
-        for number, (_, label, note, _, disabled) in enumerate(options, 1):
+        for number, (_, label, note, disabled) in enumerate(options, 1):
             extra = disabled or note
             self.say(f"  {number}) {label}" + (f" ({self.t(extra)})" if extra else ""))
         allowed = {str(number): option[0] for number, option in enumerate(options, 1)
-                   if not option[4]}
+                   if not option[3]}
         while True:
             picked = [item.strip() for item in self.ask(self.t("clients.numbers")).split(",")
                       if item.strip()]
