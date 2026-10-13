@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.1.1 - 2026-10-13
+
+- Fixed checked assistants in the installer showing as a solid green block instead of a green ●. prompt_toolkit's default style reverses the `selected` class, which questionary reuses for checked items; the installer style now sets `noreverse`.
+- Assistants that are already installed are no longer checked at the start; they are only labeled `installed`. Before, pressing Space on one to select it unchecked it instead.
+- Added 1 test (95 total).
+
 ## 1.1.0 - 2026-10-13
 
 Version 1.1.0 lets an assistant do in one call what used to take several, and makes the installed server start faster.

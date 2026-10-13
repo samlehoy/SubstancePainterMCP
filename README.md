@@ -40,7 +40,7 @@ It first asks for a language (English or Bahasa Indonesia), then walks you throu
 
 ```text
 ╭───────────────────────────────────────────╮
-│  Substance Painter MCP · installer 1.1.0  │
+│  Substance Painter MCP · installer 1.1.1  │
 ╰───────────────────────────────────────────╯
 ✔ Painter 12.1.5 found
 
@@ -241,7 +241,7 @@ Installer menanyakan bahasa dulu (English atau Bahasa Indonesia), lalu memandu A
 
 ```text
 ╭───────────────────────────────────────────╮
-│  Substance Painter MCP · instalasi 1.1.0  │
+│  Substance Painter MCP · instalasi 1.1.1  │
 ╰───────────────────────────────────────────╯
 ✔ Painter 12.1.5 ditemukan
 
